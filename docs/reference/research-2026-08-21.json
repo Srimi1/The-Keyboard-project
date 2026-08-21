@@ -1,0 +1,1014 @@
+{
+  "summary": "Research iOS keyboard extension constraints, Gboard spec, build approaches, and distribution for the Keyboard Project plan",
+  "agentCount": 5,
+  "logs": [
+    "Research done: 4/4 agents returned findings"
+  ],
+  "result": {
+    "research": {
+      "ios": {
+        "summary": "iOS custom keyboards are app extensions: a UIInputViewController subclass in a keyboard-extension target embedded in a host (containing) app, with NSExtensionPointIdentifier com.apple.keyboard-service. Data sharing with the host app uses App Groups (UserDefaults(suiteName:)/shared container). Critically, without Full Access the extension can generally READ the shared container but writes are unreliable/blocked — production keyboards mirror settings locally with timestamps. Free \"Personal Team\" provisioning allows on-device testing but Apple lists App Groups among entitlement-gated capabilities; profiles expire every 7 days and App Store distribution requires the $99 program, so a paid membership is strongly advisable for this project.\n\nFull Access (RequestsOpenAccess=true in Info.plist, then the user toggles \"Allow Full Access\" in Settings > General > Keyboard > Keyboards) gates: network, UIPasteboard, Location/Contacts, reliable shared-container writes, audio playback (playInputClick), and haptics (UIImpactFeedbackGenerator silently no-ops without it — unchanged by iOS 16's system-keyboard haptics setting, which applies only to Apple's keyboard). Check via hasFullAccess (iOS 11+). App Review Guideline 4.4.1 requires keyboards to remain functional without network and without Full Access.\n\nMemory: jetsam kills keyboard extensions at roughly 60MB phys_footprint (reports range 30–70MB by device/OS pressure) — silently, no crash log; the user just sees the keyboard vanish. Practical budget: stay under ~30–40MB; SwiftUI works (KeyboardKit is SwiftUI-based, via the input view controller hosting SwiftUI) but adds overhead, and iOS 17.0–17.1 had crashes when a text field inside a keyboard gained focus without Full Access (fixed ~17.2).\n\nClipboard: iOS has no background clipboard monitoring, period. Since iOS 16, reading UIPasteboard values triggers the \"Allow Paste\" alert; iOS 16.1 added per-app Settings > [App] > \"Paste from Other Apps\" (Ask/Deny/Allow) which covers both the app and its keyboard extension (confirmed by Paste's docs). changeCount, hasStrings/hasURLs, and detectPatterns(for:) do NOT trigger the prompt. Real clipboard-history keyboards (Paste, ClipBox, PastePal) therefore capture opportunistically: read the pasteboard when the keyboard opens (and poll changeCount while it stays open), when the main app opens, and via share/action extensions — anything copied between openings beyond the latest item is lost. Notably, Gboard on iOS does NOT ship Android's clipboard-history feature — so this project would exceed Gboard-iOS parity.\n\ntextDocumentProxy: insertText, deleteBackward, adjustTextPosition(byCharacterOffset:); documentContextBeforeInput/AfterInput return only limited context (roughly the current sentence(s)/paragraph, ~last two sentences reported), not the whole document; \"full document context\" requires cursor-moving hacks (KeyboardKit Pro). No access to the system autocorrect engine; you build autocorrect from UITextChecker plus requestSupplementaryLexicon (UILexicon: contact names + user text replacements), available even without Full Access. Secure/phone-pad fields force the system keyboard; host apps can ban custom keyboards entirely.\n\nUI: show a globe key only when needsInputModeSwitchKey is true (false on Face ID iPhones, where the system draws globe/dictation below the keyboard); call advanceToNextInputMode/handleInputModeList. Height is customizable via an Auto Layout constraint after first draw, with long-standing flicker/wrong-initial-height issues (still reported on iOS 18/26). iOS 18 + Xcode 16 broke gesture handling in scroll views and killed the selector-based openURL trick (use SwiftUI Link). iOS 26 (Liquid Glass) wraps keyboards in a system rounded-glass background — custom keyboards must use transparent backgrounds to avoid a gray bar; no new extension APIs, mostly visual adaptation.",
+        "key_facts": [
+          {
+            "fact": "A custom keyboard is an app extension built on a UIInputViewController subclass (NSExtensionPointIdentifier com.apple.keyboard-service), shipped inside a containing/host app; the system loads it into other apps' processes when selected.",
+            "confidence": "high",
+            "source": "https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html"
+          },
+          {
+            "fact": "Without RequestsOpenAccess/Full Access, a keyboard has: no network, no UIPasteboard, no Location/Contacts, no reliable shared-container access, no audio playback; Apple's archive guide lists all of these as open-access-gated.",
+            "confidence": "high",
+            "source": "https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html"
+          },
+          {
+            "fact": "RequestsOpenAccess is set in the extension's Info.plist (NSExtensionAttributes); the user must additionally toggle 'Allow Full Access' in Settings > General > Keyboard > Keyboards > [keyboard]; check at runtime with hasFullAccess (iOS 11+).",
+            "confidence": "high",
+            "source": "https://shyngys.com/ios-custom-keyboard-guide and Apple archive guide"
+          },
+          {
+            "fact": "App Review Guideline 4.4.1: keyboard extensions must provide keyboard input functionality, remain functional without full network access and without requiring Full Access, and may collect user activity only to enhance the keyboard's functionality.",
+            "confidence": "high",
+            "source": "https://developer.apple.com/app-store/review/guidelines/ (4.4.1)"
+          },
+          {
+            "fact": "Without Full Access, App Group shared-container reads generally work but writes fail or are unreliable; production keyboards mirror preferences in both shared and local defaults with timestamp conflict resolution.",
+            "confidence": "medium",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af and https://www.securing.pl/en/third-party-iphone-keyboards-vs-your-ios-application-security/"
+          },
+          {
+            "fact": "Keyboard extension memory ceiling is ~60MB phys_footprint (measured 63MB kill on device; other reports 30-60MB); jetsam kills the extension silently with no crash log and iOS swaps back to the previous keyboard. Practical budget: keep steady-state well under ~40MB.",
+            "confidence": "medium",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af (plus React Native issue #31910 reporting ~48MB and forum reports)"
+          },
+          {
+            "fact": "UIInputViewController leaks: each host app instantiates a new controller and its view is retained even after dismissal, so per-appearance allocations accumulate; heavy visual effects (gradients/shadows) worsen it. Mitigations: memory-mapped resources (52MB->27MB in one case), empty views in deinit deferred a runloop turn.",
+            "confidence": "medium",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af"
+          },
+          {
+            "fact": "Since iOS 16, reading UIPasteboard values (string/strings/etc.) from another app triggers the system 'Allow Paste' alert; since iOS 16.1 each app has Settings > [App] > 'Paste from Other Apps' (Ask/Deny/Allow) to suppress it permanently.",
+            "confidence": "high",
+            "source": "https://sarunw.com/posts/uipasteboard-privacy-change-ios16/ and https://www.ithinkdiff.com/why-do-you-see-the-allow-paste-prompt-in-ios-16/"
+          },
+          {
+            "fact": "The 'Paste from Other Apps = Allow' setting on the containing app covers its keyboard extension too: Paste's docs state granting it lets 'both Paste and Paste Keyboard' access the clipboard without per-read prompts.",
+            "confidence": "high",
+            "source": "https://pasteapp.io/help/allow-paste-permissions-in-ios"
+          },
+          {
+            "fact": "UIPasteboard.changeCount, hasStrings/hasURLs/hasImages, and detectPatterns(for:) (iOS 14+) do not trigger the paste prompt; only exposing actual values does. This enables prompt-free change detection while the keyboard is visible.",
+            "confidence": "medium",
+            "source": "https://sarunw.com/posts/uipasteboard-privacy-change-ios16/ and https://sentinelden.com/blog/pasteboard-detection-without-banner/"
+          },
+          {
+            "fact": "iOS has no background clipboard monitoring for third parties. Clipboard-history apps (Paste, ClipBox, PastePal) capture only when their code runs: keyboard extension open (read + poll while visible), main app foregrounded, or share/action extensions. Items copied between openings are lost except the most recent.",
+            "confidence": "high",
+            "source": "https://pasteapp.io/help/paste-on-iphone"
+          },
+          {
+            "fact": "Gboard for iOS does NOT include Android Gboard's clipboard-history/clipboard-tab feature; iOS users need third-party clipboard keyboards for history.",
+            "confidence": "medium",
+            "source": "https://support.google.com/websearch/thread/105849467 and https://clipboardai.app/blog/articles/iphone-vs-android-clipboard-war"
+          },
+          {
+            "fact": "UIImpactFeedbackGenerator/UIFeedbackGenerator are callable in keyboard extensions but produce no haptics unless Full Access is enabled (silent no-op). KeyboardKit documents both haptic and audio feedback as requiring open access. iOS 16's 'Keyboard Feedback > Haptic' setting applies only to Apple's system keyboard and did not change extension rules.",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/63493, https://keyboardkit.com/features/feedback, https://9to5mac.com/2022/09/13/ios-16-haptic-feedback-keyboard/"
+          },
+          {
+            "fact": "Key click sounds: adopt UIInputViewAudioFeedback (enableInputClicksWhenVisible=true) and call UIDevice.current.playInputClick(); Apple's guide lists audio playback under open-access capabilities. Practical keyboards use AudioServicesPlaySystemSound (no audio session, respects ringer/silent switch) rather than AVAudioPlayer (media-volume bus).",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html and dev.to three-hard-constraints article"
+          },
+          {
+            "fact": "textDocumentProxy offers insertText, deleteBackward, adjustTextPosition(byCharacterOffset:); documentContextBeforeInput/AfterInput return only nearby context (reported ~last two sentences / up to sentence-paragraph boundaries), never the full document; KeyboardKit Pro's fullDocumentContext() reconstructs more by moving the cursor, which is inherently hacky.",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/772158 and https://keyboardkit.com/features/proxy-utilities"
+          },
+          {
+            "fact": "Custom keyboards get no access to the system autocorrect/QuickType engine. Available primitives: UITextChecker (spell check/guesses/completions) and requestSupplementaryLexicon (UILexicon: unpaired contact names + Settings text replacements + common words), available regardless of Full Access; most keyboards implement autocorrect themselves.",
+            "confidence": "high",
+            "source": "https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html and https://shyngys.com/ios-custom-keyboard-guide"
+          },
+          {
+            "fact": "Custom keyboards are automatically replaced by the system keyboard in secureTextEntry (password) fields and phone-pad keyboard types, and any host app can ban all third-party keyboards via shouldAllowExtensionPointIdentifier (common in banking apps).",
+            "confidence": "high",
+            "source": "https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html"
+          },
+          {
+            "fact": "Globe key: show one only if needsInputModeSwitchKey is true; it is false on Face ID iPhones because the system draws globe/dictation keys below the keyboard. Wire it to advanceToNextInputMode()/handleInputModeList(from:with:); you cannot choose which keyboard comes next.",
+            "confidence": "high",
+            "source": "https://developer.apple.com/documentation/uikit/uiinputviewcontroller/needsinputmodeswitchkey and forum threads 92030/90937"
+          },
+          {
+            "fact": "Keyboard height is customizable via a height NSLayoutConstraint on the input view (width always system-set); it only takes effect after the view first draws, and wrong-initial-height/resize-flicker issues persist into iOS 18/26 (view sized 0x0 -> fullscreen -> settling), with host apps sometimes missing keyboard frame-change notifications for taller keyboards.",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/813579 and https://github.com/DimaVartanian/keyboard-extension-height-bug"
+          },
+          {
+            "fact": "SwiftUI works in keyboard extensions (host SwiftUI from the UIInputViewController); KeyboardKit, the leading open-source keyboard SDK, is fully SwiftUI-based. Caveat: SwiftUI adds memory overhead against the ~60MB cap.",
+            "confidence": "high",
+            "source": "https://github.com/KeyboardKit/KeyboardKit"
+          },
+          {
+            "fact": "iOS 17 issues: focusing a text field INSIDE a keyboard extension crashed when Full Access was disabled (iOS 17.0-17.1); iOS 17.1 had extension launch crashes in production fixed by 17.2; iOS 17.2-17.3.1 made keyboards whose extension bundle ID segment starts with 'se' disappear.",
+            "confidence": "medium",
+            "source": "https://keyboardkit.com/blog/2023/11/13/text-input-crashes-in-ios17, https://keyboardkit.com/blog/2023/12/10/critical-extension-crashes-in-ios-17-1, https://developer.apple.com/forums/thread/746530"
+          },
+          {
+            "fact": "iOS 18 changes: Xcode 16 builds broke multi-gesture buttons inside scroll views (emoji grids) requiring gesture rewrites, and iOS 18 killed the responder-chain/selector-based UIApplication.openURL trick keyboards used to open their host app — SwiftUI Link is the remaining sanctioned route.",
+            "confidence": "high",
+            "source": "https://keyboardkit.com/blog/2024/09/06/xcode16-breaks-emoji-keyboard-gestures-in-ios18 and https://keyboardkit.com/blog/2024/09/11/ios18-breaks-selector-based-url-opening"
+          },
+          {
+            "fact": "iOS 26 (Liquid Glass, 2025): no new custom-keyboard APIs, but in Liquid Glass-adopting apps the system wraps the keyboard in a rounded glass background container; opaque keyboard backgrounds show as a gray bar/frame, so keyboards should use transparent backgrounds. Native key metrics (heights/insets/font weights) also changed and varied across betas; system keys use bolder fonts and icon-based primary keys.",
+            "confidence": "medium",
+            "source": "https://keyboardkit.com/blog/2025/07/28/custom-ios-keyboard-extensions-and-liquid-glass and https://developer.apple.com/forums/thread/793686"
+          },
+          {
+            "fact": "Free Apple Account (Personal Team): on-device testing only, max 10 App IDs, 3 devices, 7-day expiring provisioning profiles (app stops launching until rebuilt); no App Store/TestFlight distribution; Apple lists entitlement-gated capabilities including App Groups as restricted for personal teams, so the App Groups half of the architecture may not work without the $99/yr program.",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/support/compare-memberships/"
+          },
+          {
+            "fact": "documentContextBeforeInput observed to return roughly only the last two sentences before the cursor rather than the full field contents (Apple Developer Forums report, 2024-2025 era).",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/772158"
+          }
+        ],
+        "open_questions": [
+          "Whether App Groups actually provisions on a free Personal Team for an iOS keyboard extension today (Apple's docs say entitlement-gated capabilities are paid-program features, but historical developer reports conflict) — needs an empirical test in Xcode with the user's Apple ID.",
+          "Exact current jetsam limit per device generation on iOS 18/26 (60MB is the commonly measured ceiling, but Apple publishes no number and it varies with device RAM and system pressure).",
+          "Whether UIDevice.playInputClick strictly requires Full Access on iOS 17/18/26 or works without it (Apple's archive doc says audio is open-access-gated; some modern reports suggest clicks can play without Full Access — needs on-device verification).",
+          "Precise attribution shown in the iOS 16+ Allow Paste alert when the reader is a keyboard extension (containing app name vs keyboard name) across iOS versions.",
+          "Whether the iOS 16 'Paste from Other Apps = Allow' setting fully suppresses prompts for keyboard-extension pasteboard reads on iOS 26 (confirmed for Paste app through iOS 17/18 docs; worth re-testing on 26).",
+          "The exact character/sentence truncation rules of documentContextBeforeInput per field type and host app (Apple does not document them; observed behavior varies).",
+          "Whether iOS 26's Liquid Glass keyboard wrapper can be detected at runtime by the extension to conditionally adjust background styling (forum posters had not found a reliable check)."
+        ]
+      },
+      "gboard": {
+        "summary": "Gboard Android (the blueprint): a 4-row QWERTY plus function row. Rows: 10 keys (q-p), 9 keys (a-l) centered with half-key inset, then shift + zxcvbnm + backspace, where shift/backspace are ~1.5x a letter key (AOSP LatinIME, Gboard's visual ancestor, uses 10%-width letter keys, 15% shift/delete). Bottom row: [?123 15%] [comma 10%] [spacebar ~50%, labeled with the language, e.g. \"English (US)\"] [period 10%] [enter ~15%]. An optional emoji smiley key sits beside the comma (shrinking the spacebar) and is mutually exclusive with the language-switch globe; Gboard 16.0+ (Oct 2025) added toggles to hide the comma/period keys entirely. Long-press behaviors: every key shows corner hint symbols when \"Long press for symbols\" is on (top row q-p = 1-0); long-press yields accents (e→é è ê...), period yields a grid of ~14 punctuation symbols (& % + # ! @, nested extras under ellipsis keys, slash via slide-left), comma yields a mini-popup with a Settings gear (and one-handed icon), spacebar long-press switches language, double-tap shift = caps lock, and \"Popup on keypress\" shows the enlarged key preview. Suggestion strip: 3 candidates, middle = autocorrect-on-space; when idle it becomes a toolbar - far-left 2x2 grid button expands a full shortcuts panel; six drag-customizable key-shaped slots (defaults ~ stickers, GIF, clipboard, settings, themes, mic far right); available shortcuts include Text Editing, Translate, One-handed, Floating, Resize, Share, Emoji, Language Switcher. Clipboard manager: clipboard icon opens a panel replacing the keys with Recent + Pinned sections; captures copied text, URLs, images, and (via \"Save recent screenshots in clipboard\") screenshots; copied items also surface as pill-shaped paste chips in the suggestion bar (\"Show recently copied text and images in suggestions bar\", with phone number/address extraction); unpinned items auto-delete after 1 hour; touch-and-hold → Pin keeps items indefinitely; pencil icon enables multi-select pin/delete; a 1h-24h retention picker was found in v18.0.3 beta (Aug 2026, unreleased). Typing: glide typing with gesture trail (default on), spacebar slide = cursor left/right, backspace slide-left = select-and-delete words, double-space period, auto-capitalization, optional dedicated Number row, height via \"Resize\" drag tool (replaced 7 presets in 2023), sound off/haptics on by default (Pixel), themes incl. My Photos and Material You dynamic color. Gboard iOS: frozen at v2.3.19 (May 2, 2022) but still on the App Store; it HAS glide typing, spacebar cursor slide (left/right only), G-button Google search, GIF/emoji search, translate, themes, haptics, one-handed mode, multilingual, voice typing (server-side); it LACKS the clipboard manager entirely, a dedicated number row (long-press number hints only), toolbar customization, gesture delete, Emoji Kitchen, offline voice, grammar/AI features, and personal dictionary sync - so the project's clipboard manager and full toolbar are exactly the features iPhone users cannot get from Google today. Apple's stock keyboard likewise has no clipboard history. Key layout difference on iOS: Gboard adds a period key right of the spacebar (unlike Apple's [123][globe][space][return]) and follows iOS conventions for the globe key.",
+        "key_facts": [
+          {
+            "fact": "Gboard Android QWERTY has 3 letter rows (10/9/7 keys) plus a function bottom row; row 2 is centered with a half-key inset; row 3 is Shift + z x c v b n m + Backspace with Shift/Backspace ~1.5x letter width",
+            "confidence": "high",
+            "source": "Universal layout, matches AOSP LatinIME geometry (android.googlesource.com)"
+          },
+          {
+            "fact": "AOSP LatinIME (open-source ancestor/reference for Gboard geometry) bottom row widths: symbols key 15%, comma 10%, spacebar starts at x=25% (~50% wide), period 10%, enter fills right (~15%); default letter key width 10%; Gboard closely matches this visually but its exact dp values are closed-source",
+            "confidence": "high",
+            "source": "https://android.googlesource.com/platform/packages/inputmethods/LatinIME/+/refs/heads/main/java/res/xml/row_qwerty4.xml"
+          },
+          {
+            "fact": "Gboard Android default bottom row order: [?123] [comma] [spacebar with language label] [period] [enter]; Gboard 16.0+ (rolled out Oct 2025) adds Preferences toggles 'Comma key' and 'Period key' to hide them, leaving only ?123 + very wide spacebar + enter",
+            "confidence": "high",
+            "source": "https://9to5google.com/2025/10/21/gboard-period-comma-keys/"
+          },
+          {
+            "fact": "The optional emoji switch key ('Show emoji switch key' in Preferences) appears beside the comma and slightly shrinks the spacebar; it is mutually exclusive with the language-switch globe key ('Show language switch key' greys out when emoji key is on)",
+            "confidence": "medium",
+            "source": "support.google.com Gboard help + webnots.com + androidcentral.com"
+          },
+          {
+            "fact": "Spacebar long-press switches language; swiping left/right on the spacebar moves the text cursor (Google-documented on both Android and iOS Gboard)",
+            "confidence": "high",
+            "source": "https://support.google.com/gboard/answer/2842292 (Android and iOS variants)"
+          },
+          {
+            "fact": "Double-tap Shift enables caps lock; single tap capitalizes next letter only; touch-and-hold any letter key shows accent/alternate-character popups",
+            "confidence": "high",
+            "source": "https://support.google.com/gboard/answer/2842292"
+          },
+          {
+            "fact": "'Long press for symbols' (Settings > Preferences) prints small hint symbols in key corners and long-press inserts them; top row q-p maps to digits 1-0 when the dedicated number row is off",
+            "confidence": "medium",
+            "source": "computerworld.com Gboard shortcuts + hardreset.info + Google Pixel community threads"
+          },
+          {
+            "fact": "Period key long-press opens a popup grid of a dozen-plus punctuation/symbols (&, %, +, #, !, @, parentheses, question mark, etc.); some grid keys show an ellipsis and holding reveals further nested characters; sliding left from the held period reaches the slash",
+            "confidence": "medium",
+            "source": "https://www.pcworld.com/article/406156/9-nifty-gboard-for-android-tricks-you-need-to-try.html + computerworld.com"
+          },
+          {
+            "fact": "Comma key long-press shows a mini-popup: drag to a Settings gear (opens Gboard settings) and a one-handed-mode icon; Google's own help says 'touch and hold the comma, then drag your finger to Settings'",
+            "confidence": "high",
+            "source": "support.google.com Gboard help (language switching article) + computerworld.com"
+          },
+          {
+            "fact": "'Popup on keypress' (Preferences) shows an enlarged character preview above the pressed key; enabled by default on Android",
+            "confidence": "medium",
+            "source": "Gboard Preferences documentation via hardreset.info / howtogeek settings guides"
+          },
+          {
+            "fact": "Suggestion strip shows 3 word candidates; the middle candidate is the autocorrect choice applied when space is pressed; long-pressing a suggestion offers removal (drag to trash)",
+            "confidence": "medium",
+            "source": "support.google.com/gboard/answer/7068415 + technipages/howtodroid guides"
+          },
+          {
+            "fact": "Toolbar (idle suggestion strip) since Feb 2023 redesign: far-left 2x2 grid button toggles a full expanded shortcuts panel; six key-shaped customizable slots (mic slot included, mic default far right); shortcuts are rearranged by drag-and-drop between panel and strip; empty slots allowed",
+            "confidence": "medium",
+            "source": "https://9to5google.com/2023/02/14/gboard-toolbar-redesign-customizability/ + https://9to5google.com/2023/06/02/customize-gboard-shortcuts/"
+          },
+          {
+            "fact": "Default Android toolbar icons: stickers, GIFs, clipboard, settings, themes, with mic on the far right; full shortcut catalog includes Settings, Theme, Text Editing, Clipboard, GIF, Floating, One-handed, Translate, Share, Sticker, Emoji, Language Switcher, Resize",
+            "confidence": "medium",
+            "source": "9to5google.com toolbar articles + chromeunboxed.com"
+          },
+          {
+            "fact": "Gboard Android clipboard: tapping the toolbar clipboard icon opens a panel (replacing the keys) with Recent and Pinned sections; tapping an item inserts it at the cursor; touch-and-hold an item > Pin saves it indefinitely; pencil icon enables multi-select for bulk pin/delete",
+            "confidence": "high",
+            "source": "https://support.google.com/gboard/answer/10742542 + howtogeek.com clipboard article"
+          },
+          {
+            "fact": "Unpinned Gboard clipboard items auto-delete after 1 hour (Google frames it as privacy protection); pinned items persist indefinitely with no stated limit",
+            "confidence": "high",
+            "source": "support.google.com Gboard community guide 446950596 + https://www.androidauthority.com/gboard-clipboard-duration-slider-apk-teardown-3698099/"
+          },
+          {
+            "fact": "Gboard v18.0.3 beta (teardown, Aug 13 2026, unreleased) adds retention presets: 1, 2, 3, 6, 12, 18, 24 hours",
+            "confidence": "medium",
+            "source": "https://www.androidauthority.com/gboard-clipboard-duration-slider-apk-teardown-3698099/"
+          },
+          {
+            "fact": "Clipboard captures copied text, URLs and images; Settings > Clipboard toggles: 'Show recently copied text and images in suggestions bar' (paste chips in the strip after copying, pill-shaped in recent versions, with phone-number/address extraction) and 'Save recent screenshots in clipboard' (rolled out ~Gboard 10.5, May 2021)",
+            "confidence": "medium",
+            "source": "https://9to5google.com/2021/05/11/gboard-clipboard-screenshots/ + https://9to5google.com/2021/02/25/gboard-clipboard-suggestion-setting/ + makeuseof.com"
+          },
+          {
+            "fact": "Clipboard history was historically OFF by default (a 'Turn on clipboard' toggle inside the panel); recent coverage describes it as enabled by default on current builds - verify on a live device",
+            "confidence": "low",
+            "source": "howtogeek.com (says default-on) vs older guides (default-off); conflicting"
+          },
+          {
+            "fact": "Glide typing settings (Settings > Glide typing): 'Enable glide typing' (default on) with 'Show gesture trail' (trail drawn in theme accent color), 'Enable gesture delete' (slide left from Backspace selects whole words progressively, release deletes), 'Enable gesture cursor control' (spacebar slide)",
+            "confidence": "medium",
+            "source": "pocket-lint.com + androidpolice.com + hardreset.info settings walkthroughs"
+          },
+          {
+            "fact": "Text correction defaults on Android: Auto-capitalization ON (first word of sentences), 'Double-space full stop' ON (double-tap space inserts period+space), Auto-correction ON, next-word prediction ON",
+            "confidence": "medium",
+            "source": "hardreset.info + howtodroid.com + makeuseof settings guides"
+          },
+          {
+            "fact": "'Number row' toggle (Settings > Preferences, off by default) adds a dedicated always-visible 1-0 row above QWERTY on Android, making 5 rows",
+            "confidence": "medium",
+            "source": "maketecheasier.com + hardreset.info"
+          },
+          {
+            "fact": "Keyboard height: the old 7 presets (Extra-short, Short, Mid-short, Normal, Mid-tall, Tall, Extra-tall, added in Gboard 8.7, 2019) were replaced in late 2023 by a 'Resize' toolbar tool with drag handles for height/size and position",
+            "confidence": "medium",
+            "source": "https://9to5google.com/2023/10/05/gboard-keyboard-height-resize/ + xda-developers.com"
+          },
+          {
+            "fact": "Key-press feedback (Settings > Preferences): 'Sound on keypress' (+ 'Volume on keypress', system default) and 'Haptic feedback on keypress' (+ 'Vibration strength on keypress'); typical Pixel defaults are sound OFF, haptics ON",
+            "confidence": "medium",
+            "source": "techmesto.com + hardreset.info (exact defaults vary by OEM)"
+          },
+          {
+            "fact": "Android theming: Themes menu offers solid colors, landscapes, gradients, 'My photos' custom image themes, a key-borders toggle, and Material You dynamic color on Android 12+",
+            "confidence": "medium",
+            "source": "9to5google Material You coverage + Gboard theme guides"
+          },
+          {
+            "fact": "One-handed mode on Android shrinks the keyboard to one side with an arrow chevron to switch sides and an expand icon to restore; reachable via toolbar shortcut or comma long-press popup",
+            "confidence": "medium",
+            "source": "computerworld.com + mobilesyrup.com"
+          },
+          {
+            "fact": "Gboard for iOS is frozen: last update v2.3.19 on May 2, 2022 (Cantonese improvements), still downloadable on the App Store (requires iOS 12+, 78 languages); Wikipedia records it as discontinued while Android gets active feature development (e.g., AI writing tools Sept 2025)",
+            "confidence": "high",
+            "source": "https://apps.apple.com/us/app/gboard-the-google-keyboard/id1091700242 + https://en.wikipedia.org/wiki/Gboard"
+          },
+          {
+            "fact": "Gboard iOS HAS: glide typing, spacebar cursor slide (left/right only - no up/down, unlike Apple's long-press trackpad), voice typing (audio sent to Google servers), emoji search, GIF search, G-button Google search, Translate, themes (incl. gradients/custom backgrounds), haptic feedback (added Feb 2019), multilingual typing, and one-handed mode (added Sept 2017, via long-press on globe/cog key)",
+            "confidence": "high",
+            "source": "App Store description + support.google.com/gboard iOS pages + iphoneincanada.ca + malaymail (haptics)"
+          },
+          {
+            "fact": "Gboard iOS LACKS (vs Android): the entire clipboard manager (no clipboard icon, history, or pinning), a dedicated number row (only long-press digit hints on the top letter row, controlled by a 'Show number row' hints toggle), toolbar customization/expanded shortcut panel, backspace gesture-delete, Emoji Kitchen, offline voice recognition, grammar correction, AI writing tools, phrase prediction, hand-drawn emoji, and personal dictionary sync",
+            "confidence": "medium",
+            "source": "support.google.com Gboard iOS threads + maketecheasier.com + mksguide.com + en.wikipedia.org/wiki/Gboard (Android-exclusive list)"
+          },
+          {
+            "fact": "Gboard iOS bottom row diverges from Apple stock: it includes a period key to the right of the spacebar and a globe/emoji key left of it (Apple stock is just [123][globe][space][return] with no period); the G button on the suggestion bar opens Google search/features",
+            "confidence": "medium",
+            "source": "webnots.com Gboard iPhone guide + techzle.com"
+          },
+          {
+            "fact": "Neither Gboard iOS nor Apple's stock iOS keyboard offers any clipboard history - iOS holds a single clipboard item system-wide - making a clipboard manager the single largest feature gap for Android switchers and the key differentiator for this project",
+            "confidence": "high",
+            "source": "support.google.com/websearch/thread/105849467 (Google confirms no clipboard options on iPhone Gboard) + clipboardai.app comparison"
+          },
+          {
+            "fact": "Android-vs-iOS Gboard parity summary: BOTH = glide typing, spacebar cursor (L/R), autocorrect/suggestions, double-space period, auto-caps, emoji/GIF search, translate, themes, haptics, one-handed, voice; ANDROID-ONLY = clipboard manager + paste chips + screenshot capture, dedicated number row, toolbar customization + text-editing pad + Resize, gesture delete, key long-press symbol hints everywhere, Emoji Kitchen, offline dictation, grammar/AI, active updates",
+            "confidence": "medium",
+            "source": "Synthesis of App Store description, Google support pages, Wikipedia, 9to5google, mksguide, iphoneswitch.com"
+          },
+          {
+            "fact": "Suggestion-strip toolbar history: pre-2023 the strip used a left chevron and 4 circular icon slots with fixed mic; Material You redesign (tested Aug 2022, rolled out Feb 2023) introduced the 2x2 grid button, key-shaped buttons, and 6 free slots",
+            "confidence": "medium",
+            "source": "https://9to5google.com/2022/08/12/gboard-material-you-bar/ + 9to5google Feb 2023"
+          }
+        ],
+        "open_questions": [
+          "Whether the Gboard Android clipboard is ON or OFF by default on a fresh 2026 install (sources conflict: older guides show a 'Turn on clipboard' toggle inside the panel, recent HowToGeek says enabled by default) - verify on a real device",
+          "Exact contents and 2D ordering of the period long-press punctuation grid in the current Gboard build (press coverage lists only a subset: & % + # ! @ ? parentheses, slash via slide-left) - best confirmed by screenshotting a live Android device",
+          "Exact dp/px key heights, gaps, and corner radii used by Gboard Android (closed source; AOSP LatinIME percentages are the only primary geometry source) - measure from device screenshots for pixel-faithful replication",
+          "How long the clipboard paste-suggestion chip stays in the suggestion bar after a copy (not documented anywhere found)",
+          "Whether current iOS Gboard (frozen v2.3.19) still shows the 'Show number row' hints toggle and what it renders on modern iPhones/iOS 18+ - needs hands-on verification",
+          "Whether long-press on Enter really triggers one-handed mode on Android (single Computerworld claim, uncorroborated)",
+          "Exact default toolbar icon order on current Gboard versions (varies by version/device/OEM; Pixel adds Proofread/Magic Cue slots)",
+          "Whether the 1h-24h clipboard retention picker from v18.0.3 beta has shipped to stable by the time the project needs it"
+        ]
+      },
+      "approaches": {
+        "summary": "KeyboardKit is the only serious iOS keyboard framework, but its licensing changed fundamentally in late 2025: KeyboardKit 10 (final ~Sept 2025; v10.8.1 shipped Aug 20, 2026) merged the formerly MIT open-source core and the commercial Pro SDK into ONE closed-source, precompiled binary XCFramework distributed via SPM, requiring iOS 16+ and depending on LicenseKit. The last fully open-source (MIT) version is the 9.x line (iOS 15+, source-readable, forkable). The v10 free tier (\"free to start using\", no license needed) includes the SwiftUI keyboard view, a fully customizable dynamic layout engine (a Gboard-style layout — number row, custom bottom row, restyled keys — is achievable), input/action callouts, gestures, audio/haptic feedback, styling, and proxy utilities. Pro-only: the local autocomplete/autocorrect/next-word engine, emoji keyboard, themes engine, dictation, full 75-locale layouts/callouts, host-app detection, in-keyboard text fields. Pro costs $50/mo (Basic, 1 language), $150/mo (Silver), $500/mo (Gold), ~17% off annually (~$500/yr Basic via Gumroad), 7-day free trial — clearly priced for businesses, not hobbyists. Community health: ~1.9k stars, essentially one maintainer (Daniel Saidi/Kankoda), but extremely active (monthly releases through Aug 2026). Fleksy SDK is the main commercial alternative: free developer tier, paid from ~$269/month — it ships mature autocorrect and swipe typing but is white-label B2B, overkill and closed. Study-worthy open-source codebases: azooKey (MIT, Swift/SwiftUI, actively maintained Japanese keyboard with its own conversion engine — best modern reference), Scribe-iOS (maintained, Swift), Tasty Imitation Keyboard (BSD-3, the classic reference but dead since 2016/last push 2020, iOS 8 era), akifkeyboard (Apache-2.0, dead 2022). From scratch: you implement everything — layout/touch engine (UIKit/SwiftUI views, slide-off and multi-touch handling, key preview popups, long-press callout menus), autocorrect (UITextChecker for spell/guesses/completions + UILexicon via requestSupplementaryLexicon for contacts/text-replacements; Apple does NOT expose its real keyboard autocorrect), emoji picker, App Group settings sync. Hard constraints: ~60MB jetsam memory ceiling with silent kills, no Full Access by default (no network; unreliable shared-container writes; system pasteboard needs Full Access — and iOS 16+ paste-permission prompts complicate clipboard managers), iOS 26.4 changed host-bundle-ID access. Realistic solo effort: a basic typeable QWERTY in 1-2 weeks; a genuinely daily-drivable keyboard (callouts, shift/caps logic, deletion acceleration, autocorrect, settings) is ~2-4 months of focused part-time work; Gboard-level polish is why Pro/Fleksy licenses cost what they do. Glide typing: technically feasible in an extension (Gboard iOS and SwiftKey do it), and 2026 changed the landscape — FUTO Swipe (swipe.futo.tech, arXiv 2606.25247) released small on-device models (635K-param layout-agnostic encoder, 300K QWERTY decoder, 1.5M ContextLM; ~4% top-4 fail rate, claims 26% fewer errors than Gboard) with a C++ beam-search inference library (GPL — fine for personal use), models under FUTO Model License, 1M-swipe dataset (MIT). Classic SHARK2 (Kristensson & Zhai 2004) has toy Python implementations on GitHub. Neither KeyboardKit free nor Pro ships glide typing. Recommendation: fork/pin KeyboardKit 9.x (MIT) or use KeyboardKit 10 free tier for layout/callouts/gestures, build the clipboard manager and Gboard theming yourself, use UITextChecker+UILexicon+custom n-gram for v1 autocorrect, defer glide typing to v2 via FUTO Swipe's C++ library. Full Access + App Group is required for the clipboard manager; a free Apple account can sideload (7-day expiry) but paid membership removes constant re-provisioning pain.",
+        "key_facts": [
+          {
+            "fact": "KeyboardKit's current major version is 10 (10.8.1 released Aug 20, 2026); releases are frequent and ongoing (10.6 June 2026, 10.7 July 2026, 10.8 Aug 2026)",
+            "confidence": "high",
+            "source": "https://github.com/KeyboardKit/KeyboardKit/releases"
+          },
+          {
+            "fact": "KeyboardKit 10 requires iOS 16+ (macOS 13, tvOS 16, watchOS 10, visionOS 1) and is distributed as a precompiled binary XCFramework via SPM, with a LicenseKit dependency — it is no longer source code you can read or fork",
+            "confidence": "high",
+            "source": "https://raw.githubusercontent.com/KeyboardKit/KeyboardKit/main/Package.swift"
+          },
+          {
+            "fact": "KeyboardKit's LICENSE on main is now a proprietary 'Closed Source License' (Kankoda Sweden AB): free to start using, Pro features require a valid license, source distribution prohibited. The official FAQ states 'The KeyboardKit SDK is closed source, but freely available from GitHub'",
+            "confidence": "high",
+            "source": "https://raw.githubusercontent.com/KeyboardKit/KeyboardKit/main/LICENSE and https://keyboardkit.com/faq"
+          },
+          {
+            "fact": "KeyboardKit 9.x (the previous major, iOS 15+) is MIT-licensed — verified at tag 9.9.0 — so the last open-source version can still be forked and modified freely",
+            "confidence": "high",
+            "source": "https://raw.githubusercontent.com/KeyboardKit/KeyboardKit/9.9.0/LICENSE"
+          },
+          {
+            "fact": "KeyboardKit 10 merged the previously separate open-source core and closed-source Pro SDKs into a single unified SDK (developer preview Aug 31, 2025, final planned Sept 2025)",
+            "confidence": "high",
+            "source": "https://danielsaidi.com/blog/2025/08/31/keyboardkit-10-developer-preview"
+          },
+          {
+            "fact": "KeyboardKit FREE tier includes: customizable SwiftUI keyboard view, dynamic customizable layout engine, input & action callouts, actions/gestures, audio+haptic feedback, styling, text-proxy utilities, status detection, deep-link opening. PRO-only: local autocomplete/autocorrect/next-word prediction engine, emoji keyboard, theme engine, dictation, full localized layouts+callouts for all ~75 locales, host-app detection, in-keyboard text fields, custom fonts",
+            "confidence": "high",
+            "source": "https://keyboardkit.com/features"
+          },
+          {
+            "fact": "KeyboardKit Pro pricing: Basic $50/mo (1 language, autocomplete), Silver $150/mo (5 languages, AI support), Gold $500/mo (75+ languages, all features); ~17% discount annually (Basic ~$500/yr on Gumroad); 7-day free trial; Business/custom license required above $10M company revenue or $1M app revenue",
+            "confidence": "high",
+            "source": "https://keyboardkit.com/pricing"
+          },
+          {
+            "fact": "KeyboardKit community health: ~1.9k stars, ~297 forks, ~3,800 commits, effectively single-maintainer (Daniel Saidi / Kankoda) but very actively maintained with monthly-or-faster releases through Aug 2026; KeyboardKit 11 is planned to require iOS 17+",
+            "confidence": "medium",
+            "source": "https://github.com/KeyboardKit/KeyboardKit"
+          },
+          {
+            "fact": "A Gboard-style layout is achievable with KeyboardKit's free layout engine (custom rows, number row, custom bottom row, full restyling), but neither free nor Pro ships glide/swipe typing — KeyboardKit has only discussed it conceptually (2022 blog on gesture engine)",
+            "confidence": "medium",
+            "source": "https://keyboardkit.com/features and https://keyboardkit.com/blog/2022/11/24/keyboard-typing-explained"
+          },
+          {
+            "fact": "Fleksy Keyboard SDK is the main commercial alternative: white-label B2B iOS/Android keyboard SDK with mature autocorrect and swipe typing; free developer tier to build, paid plans starting around $269/month (yearly plan), exact pricing via sales",
+            "confidence": "medium",
+            "source": "https://www.fleksy.com/developers/ (via search; site DNS unreachable during research)"
+          },
+          {
+            "fact": "Tasty Imitation Keyboard (archagon), the classic open-source iOS keyboard reference, is BSD-3 licensed, 1.2k stars, iOS 8-era, last pushed May 2020 — useful to read for touch-handling ideas but dead as a dependency",
+            "confidence": "high",
+            "source": "https://api.github.com/repos/archagon/tasty-imitation-keyboard"
+          },
+          {
+            "fact": "azooKey (github.com/azooKey/azooKey) is the best modern open-source iOS keyboard to study: MIT, Swift/SwiftUI, its own conversion/prediction engine, flexible key layouts, actively maintained with Discord community and TestFlight betas",
+            "confidence": "high",
+            "source": "https://github.com/azooKey/azooKey"
+          },
+          {
+            "fact": "Other open-source iOS keyboard codebases: Scribe-iOS (scribe-org, Swift, actively maintained language-learner keyboards), akifkeyboard (Apache-2.0, near-full feature set, dead since May 2022), Slidden and JustType (both ancient)",
+            "confidence": "high",
+            "source": "https://github.com/scribe-org/Scribe-iOS and https://api.github.com/repos/cemheren/akifkeyboard"
+          },
+          {
+            "fact": "Hard constraint 1 for keyboard extensions: ~60MB physical-footprint memory ceiling enforced by jetsam with SILENT kills (no crash log); intermittent under system memory pressure (article dated Aug 9, 2026)",
+            "confidence": "medium",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af"
+          },
+          {
+            "fact": "Hard constraint 2: without Full Access (RequestsOpenAccess, off by default) a keyboard extension has no network, no system pasteboard access, and shared-container (App Group) writes fail silently — Full Access is mandatory for a Gboard-style clipboard manager",
+            "confidence": "high",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af and https://developer.apple.com/documentation/uikit/configuring-open-access-for-a-custom-keyboard"
+          },
+          {
+            "fact": "iOS 16+ shows a system 'would like to paste' permission prompt when reading UIPasteboard.general programmatically; UIPasteControl or per-app 'Paste from Other Apps' settings avoid it — this shapes clipboard-manager UX for a keyboard capturing clipboard history",
+            "confidence": "high",
+            "source": "https://sarunw.com/posts/uipasteboard-privacy-change-ios16/"
+          },
+          {
+            "fact": "From scratch you must build: key layout engine, multi-touch + slide-off touch handling, key-preview popups, long-press callouts, shift/caps/delete-repeat logic, autocorrect pipeline, emoji picker, App Group settings sync; audio feedback must use AudioServicesPlaySystemSound (AVAudioPlayer uses the wrong audio bus in extensions)",
+            "confidence": "high",
+            "source": "https://dev.to/tbds_2dadf2b626f315902eae/the-three-hard-constraints-of-an-ios-keyboard-extension-46af and https://developer.apple.com/documentation/UIKit/creating-a-custom-keyboard"
+          },
+          {
+            "fact": "Realistic solo effort: basic typeable QWERTY extension in days-to-2-weeks; daily-drivable quality (callouts, autocorrect, polish) roughly 2-4 months part-time; industry sources describe full commercial-grade keyboards as 'months of work and fortunes' — which is Fleksy's/KeyboardKit's sales pitch",
+            "confidence": "low",
+            "source": "Synthesis from https://www.fleksy.com/blog/ios-custom-keyboard/ and dev.to first-hand accounts"
+          },
+          {
+            "fact": "Apple gives third-party keyboards NO access to its own autocorrect engine; available primitives are UITextChecker (rangeOfMisspelledWord, guesses, completions), UILexicon via requestSupplementaryLexicon (contacts names + user text replacements), plus roll-your-own dictionaries/n-gram models or CoreML — this is why third-party autocorrect feels worse than stock",
+            "confidence": "high",
+            "source": "https://developer.apple.com/documentation/uikit/uiinputviewcontroller/requestsupplementarylexicon(completion:) and https://nshipster.com/uitextchecker/"
+          },
+          {
+            "fact": "Glide typing is feasible in iOS keyboard extensions (Gboard for iOS and SwiftKey ship it); nothing in the extension API blocks continuous-gesture recognition across your own view",
+            "confidence": "high",
+            "source": "Product precedent (Gboard iOS, SwiftKey); https://www.fleksy.com/blog/how-swipe-typing-works/"
+          },
+          {
+            "fact": "FUTO Swipe (released ~June 2026) is the first serious open swipe-typing stack: 635K-param layout-agnostic encoder + 300K QWERTY-English decoder + 1.5M-param ContextLM, ~4% top-4 fail rate, claimed 26% fewer errors than Gboard; C++ beam-search inference library under GPL, models under FUTO Model License, 1M-swipe training dataset under MIT on HuggingFace; technical report arXiv:2606.25247",
+            "confidence": "high",
+            "source": "https://swipe.futo.tech/ and https://gitlab.futo.org/keyboard/swipe-library"
+          },
+          {
+            "fact": "No official iOS port of FUTO Swipe exists yet, but the C++ library is designed to be embedded on other platforms (FuriOS/Linux port announced); GPL + personal use is compatible with a personal-use iOS keyboard, and its small model sizes fit the ~60MB extension memory budget",
+            "confidence": "medium",
+            "source": "https://swipe.futo.tech/ and https://furilabs.com/blog/swipe-keyboard/"
+          },
+          {
+            "fact": "Classic SHARK2 shape-writing algorithm (Kristensson & Zhai, UIST 2004) has educational open-source Python implementations (aferruzza/SHARK2-Gesture-Typing, Trisha11r/Decode_Gesture_SHARK2_algo) — usable as algorithm references for a template-matching (non-ML) glide decoder over a 10k-word dictionary",
+            "confidence": "high",
+            "source": "http://pokristensson.com/pubs/KristenssonZhaiUIST2004.pdf and https://github.com/aferruzza/SHARK2-Gesture-Typing"
+          },
+          {
+            "fact": "Android-side references for Gboard-parity features: FUTO Keyboard (source-available, Source First License), HeliBoard (open source, but its glide typing requires Google's proprietary libjni_latinimegoogle library), and CleverKeys (open source, in-house swipe engine + searchable clipboard history with tags — closest open analog to the desired feature set)",
+            "confidence": "medium",
+            "source": "https://github.com/futo-org/android-keyboard and https://github.com/tribixbite/CleverKeys"
+          },
+          {
+            "fact": "A free Apple Developer account (personal team) can build and sideload a keyboard extension to the developer's own device, but provisioning profiles expire every 7 days and capability changes (including App Groups) are restricted/limited; paid membership ($99/yr) removes the re-signing burden and TestFlight/App Store limits",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/support/compare-memberships/ and https://mybyways.com/blog/new-limitations-imposed-on-free-apple-developer-account"
+          },
+          {
+            "fact": "Recent iOS changes relevant to keyboards: iOS 26.4 changed host-app bundle ID access (previous private _hostBundleID paths return nil; KeyboardKit 10.6.1 restored a hostApplicationBundleId property that only works on iOS 26.4+); iOS 17.2 had a bug where some keyboard extensions disappeared",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/826851 and https://github.com/KeyboardKit/KeyboardKit/releases"
+          },
+          {
+            "fact": "RECOMMENDATION for this project (personal-use, English-only, Gboard clone with clipboard manager): build on KeyboardKit rather than fully from scratch — either the v10 free tier (binary, iOS 16+) or a fork of MIT-licensed 9.x for full source control. The free tier covers the hardest commodity work (layout engine, callouts, gestures, feedback, styling) and its layout engine can express a Gboard layout; implement the clipboard manager (App Group + Full Access), Gboard theming, and v1 autocorrect (UITextChecker + UILexicon + small frequency dictionary) yourself — none of those are Pro-gated. Skip Pro ($50+/mo is unjustifiable for personal use) and skip Fleksy (~$269/mo B2B). Defer glide typing to v2 using FUTO Swipe's C++ GPL library as the only credible open path. Going 100% from scratch only makes sense if the goal is learning; expect 2-4x the calendar time to reach daily-drivable",
+            "confidence": "medium",
+            "source": "Synthesis of all sources above"
+          }
+        ],
+        "open_questions": [
+          "Exact free-tier layout coverage in KeyboardKit 10: whether locale layouts beyond English (and which callout sets) work without a Pro license — the README/features pages are ambiguous ('75 locales' listed under both free and Pro); needs a hands-on test of the free SDK",
+          "Whether KeyboardKit 10's binary SDK performs any network license validation from the extension (relevant because keyboards without Full Access have no network) — release notes mention 'faster license validation' but the mechanism is undocumented publicly",
+          "Whether App Groups actually provision correctly on a free personal team for a keyboard-extension + container-app pair on current Xcode/iOS 26 (community reports conflict; the definitive apple-dev.groups.io thread was paywalled) — determines if the clipboard manager can be tested without the $99/yr membership",
+          "Whether FUTO Swipe's C++ swipe-library compiles cleanly for iOS/arm64 within the ~60MB extension memory ceiling, and whether the FUTO Model License permits redistribution inside a personal sideloaded app (fine for private use, unclear for any future App Store release)",
+          "Fleksy SDK's current exact pricing tiers and whether its free developer tier permits indefinite personal (non-commercial) use — fleksy.com was unreachable (DNS) during research; needs direct contact or retry",
+          "Precise current jetsam memory limit per device class in iOS 26 for keyboard extensions (reports range 48-70MB; Apple documents no number)",
+          "Whether KeyboardKit 11 (iOS 17+ minimum, hinted for late 2026) will change free-tier scope or pricing again before this project ships"
+        ]
+      },
+      "distribution": {
+        "summary": "Free Apple ID \"personal team\" provisioning remains fully viable for this project in 2025-2026, and — critically — keyboard extensions work with it. A custom keyboard needs no paid-only entitlement: the keyboard target itself requires nothing special, RequestsOpenAccess (Full Access) is an Info.plist key plus a user toggle in Settings (not a provisioned entitlement), and App Groups — required for host-app-to-keyboard data sharing — is listed in Apple's \"Supported capabilities (iOS)\" table as available to free Apple Developer accounts. Real-world proof: the LoopKit community builds Loop (which uses App Groups across app + extensions) with free accounts, removing only Push Notifications, Siri, NFC and Time Sensitive Notifications, which ARE paid-only. Free-account limits: provisioning profiles expire 7 days from issuance (the app literally stops launching — your daily-driver keyboard dies weekly), 10 App IDs at a time/per 7 days (host app + keyboard extension consume 2), 10 App ID capability changes per 7 days, 3 test devices per platform, and roughly 3 development apps installed per device. Developer Mode (Settings > Privacy & Security, iOS 16+) must be enabled for any development-signed install. After one cable deploy, Xcode supports Wi-Fi deployment (\"Connect via network\"), so the weekly ritual is: open Xcode, plug in or be on same Wi-Fi, Cmd+R, ~2-5 minutes — tolerable for a hobbyist but genuinely annoying for the keyboard you type on all day, and catastrophic if it expires while traveling without the Mac. The paid $99/yr Apple Developer Program removes all of this: development/ad-hoc provisioning lasts 1 year, 100 devices/type/year, and TestFlight gives OTA installs with 90-day build expiry and up to 100 internal testers with no review (external testers require Beta App Review). App Groups + keyboard + Full Access all work identically on paid. AltStore/SideStore use the same free-account backend, inheriting the identical 7-day/3-app/10-App-ID limits; AltStore prompts \"App contains extensions\" and can keep (costing extra App IDs) or strip extensions — a stripped build has no keyboard at all — and both stores rewrite app-group identifiers per-account, which can break hardcoded group strings; their one real benefit is background auto-refresh (AltServer on same Wi-Fi, or SideStore on-device), but first-hand reports of keyboards working via AltStore are sparse, so treat it as unproven for this use case. Design constraint discovered: without Full Access a keyboard has no network, no pasteboard, and can only READ (not write) the shared app-group container — so the clipboard manager requires Full Access, and iOS 16+ paste-privacy prompts (\"Allow Paste\") plus the per-app \"Paste from Other Apps\" setting will shape the capture UX. For a later App Store launch, guideline 4.4/4.4.1 requires: the host app must have real functionality (help screens, settings), the keyboard must provide actual typed input, offer a next-keyboard method, remain functional WITHOUT Full Access, collect user activity only to enhance the keyboard itself, never launch other apps besides Settings, and never repurpose keys; 5.1.1 requires a privacy policy link in-app and in App Store Connect. Recommendation: start free — it costs nothing to build, deploy, and validate the whole stack including App Groups and Full Access on your own iPhone. Upgrade to the $99 program the moment the keyboard becomes your real daily driver (realistically within the first month): 1-year signing or 90-day TestFlight builds versus 7-day expiry is the difference between a usable daily keyboard and a weekly chore. Skip AltStore/SideStore as the primary path since you have Xcode and the source.",
+        "key_facts": [
+          {
+            "fact": "Free personal-team provisioning profiles expire 7 days from issuance; the app stops launching entirely at expiry and must be rebuilt/re-deployed from Xcode",
+            "confidence": "high",
+            "source": "https://developer.apple.com/support/compare-memberships/ and https://loopkit.github.io/loopdocs/build/apple-developer/"
+          },
+          {
+            "fact": "Free accounts: max 10 App IDs registered at a time (each expiring after 7 days), 10 App ID capability changes per 7 days, and 3 registered test devices per platform",
+            "confidence": "high",
+            "source": "https://developer.apple.com/support/compare-memberships/ and https://developer.apple.com/forums/thread/675347"
+          },
+          {
+            "fact": "Each app extension consumes its own App ID, so host app + keyboard extension = 2 of the 10 weekly App IDs",
+            "confidence": "high",
+            "source": "https://faq.altstore.io/altstore-classic/app-ids"
+          },
+          {
+            "fact": "Keyboard extensions build and run with free provisioning; the keyboard extension point itself needs no paid-only entitlement, and Full Access (RequestsOpenAccess) is an Info.plist key + user Settings toggle, not a provisioning entitlement",
+            "confidence": "high",
+            "source": "https://developer.apple.com/documentation/UIKit/creating-a-custom-keyboard and https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html"
+          },
+          {
+            "fact": "App Groups is available to free 'Apple Developer' personal-team accounts on iOS per Apple's Supported capabilities (iOS) table; corroborated by the Loop DIY community building App-Group-using apps on free accounts while removing only Push Notifications, Siri, NFC, and Time Sensitive Notifications (which are paid-only)",
+            "confidence": "high",
+            "source": "https://developer.apple.com/help/account/reference/supported-capabilities-ios/ and https://loopkit.github.io/loopdocs/build/build-free-loop/"
+          },
+          {
+            "fact": "Without Full Access a custom keyboard has no network access, no pasteboard access, and can read but NOT write the shared app-group container; Full Access unlocks pasteboard, network, and read/write shared container — so a clipboard manager keyboard requires Full Access",
+            "confidence": "high",
+            "source": "https://developer.apple.com/documentation/UIKit/creating-a-custom-keyboard and https://developer.apple.com/documentation/uikit/configuring-open-access-for-a-custom-keyboard"
+          },
+          {
+            "fact": "iOS 16+ shows an 'Allow Paste' privacy prompt on programmatic UIPasteboard reads without user interaction; UIPasteControl and the per-app 'Paste from Other Apps' Settings option are the mitigations — this directly affects clipboard-capture UX",
+            "confidence": "high",
+            "source": "https://sarunw.com/posts/uipasteboard-privacy-change-ios16/"
+          },
+          {
+            "fact": "Developer Mode (Settings > Privacy & Security > Developer Mode, introduced iOS 16) is required to run development-signed apps including Xcode and AltStore/SideStore installs; TestFlight and App Store apps do not need it",
+            "confidence": "high",
+            "source": "https://developer.apple.com/videos/play/wwdc2022/110344/ and https://blog.diawi.com/2022/10/25/developer-mode-required-in-ios-ipados-16/"
+          },
+          {
+            "fact": "Paid $99/yr program: development provisioning for device testing lasts 1 year (vs 7 days), 100 registered devices per device type per year, and ad-hoc distribution is enabled",
+            "confidence": "high",
+            "source": "https://developer.apple.com/support/compare-memberships/ and https://appcircle.io/guides/ios/ios-app-distribution"
+          },
+          {
+            "fact": "TestFlight (paid only): builds expire after 90 days; up to 100 internal testers (App Store Connect team members) with no review required; up to 10,000 external testers require Beta App Review; App Groups + keyboard extensions + Full Access all function normally on TestFlight builds",
+            "confidence": "high",
+            "source": "https://appcircle.io/guides/ios/ios-app-distribution and https://www.drizz.dev/post/testflight-access"
+          },
+          {
+            "fact": "AltStore/SideStore with a free Apple ID inherit the same Apple-enforced limits: 3 sideloaded apps installed at a time, 10 App IDs per week, 7-day expiry; the workaround they add is automatic background re-signing (AltServer on same Wi-Fi for AltStore; on-device via pairing-file/VPN trick for SideStore)",
+            "confidence": "high",
+            "source": "https://docs.sidestore.io/docs/faq and https://faq.altstore.io/altstore-classic/your-altstore"
+          },
+          {
+            "fact": "AltStore shows an 'App contains extensions' prompt letting you keep extensions (each consuming an App ID) or remove them; removing extensions deletes the keyboard from the bundle entirely, and the prompt historically failed to appear for source-downloaded apps (GitHub issues #929 altstoreio, #637 SideStore)",
+            "confidence": "high",
+            "source": "https://github.com/rileytestut/AltStore/issues/929 and https://github.com/SideStore/SideStore/issues/637"
+          },
+          {
+            "fact": "AltStore/SideStore rewrite app-group identifiers to be unique per signing account (team-ID suffixing), which can break apps that hardcode their app-group string — a specific risk for a keyboard+host sharing a group container; look the group ID up dynamically rather than hardcoding",
+            "confidence": "medium",
+            "source": "https://github.com/SideStore/SideStore/issues/68 and SideStore docs discussion of groupID rewriting"
+          },
+          {
+            "fact": "There are no widely-documented first-hand reports confirming keyboard extensions function end-to-end when installed via AltStore/SideStore with a free account; evidence is indirect (extensions are supported if App IDs allow), so this path is unproven for keyboards",
+            "confidence": "medium",
+            "source": "Absence of reports across faq.altstore.io, docs.sidestore.io, GitHub issues searches"
+          },
+          {
+            "fact": "Practical weekly workflow on free account: after first cable deploy and device trust (Settings > General > VPN & Device Management), Xcode supports Wi-Fi deployment via 'Connect via network'; a rebuild takes minutes, but if the profile lapses away from the Mac, the keyboard is dead until you return — Loop users report the app 'turns white and closes' on day 7",
+            "confidence": "medium",
+            "source": "https://loopkit.github.io/loopdocs/faqs/loop-faqs/ and standard Xcode wireless-debugging behavior (not re-verified against a primary doc this session)"
+          },
+          {
+            "fact": "App Store guideline 4.4: host apps containing extensions must include real functionality such as help screens and settings interfaces; extensions may not contain marketing, advertising, or IAP",
+            "confidence": "high",
+            "source": "https://developer.apple.com/app-store/review/guidelines/"
+          },
+          {
+            "fact": "Guideline 4.4.1 keyboard rules: must provide actual typed-character input, provide a method to switch to the next keyboard, remain functional without full network access and without Full Access, collect user activity only to enhance keyboard functionality on-device; must NOT launch other apps besides Settings and must not repurpose keys (no keylogging/profile-building — 5.1.2 forbids using collected data to build user profiles)",
+            "confidence": "high",
+            "source": "https://developer.apple.com/app-store/review/guidelines/"
+          },
+          {
+            "fact": "Guideline 5.1.1: privacy policy link required both in App Store Connect metadata and inside the app, identifying what is collected, how, all uses, retention/deletion, and consent revocation; consent required for any user/usage data collection even if anonymous",
+            "confidence": "high",
+            "source": "https://developer.apple.com/app-store/review/guidelines/"
+          },
+          {
+            "fact": "Known iOS bug: custom keyboards with certain bundle-ID prefixes (reported 'mn.' on iOS 13, 'se.' on iOS 17.2+) silently fail to appear in Settings > Add New Keyboard — choose a conventional reverse-DNS bundle ID (e.g. com.yourname.*)",
+            "confidence": "medium",
+            "source": "https://developer.apple.com/forums/thread/121542 and https://developer.apple.com/forums/thread/746530"
+          },
+          {
+            "fact": "Free-provisioning limits (7-day/3-app/10-App-ID) are unchanged as of 2025-2026; the EU third-party-marketplace path (iOS 17.4+) does not apply outside the EU and is irrelevant for a US personal-use build",
+            "confidence": "medium",
+            "source": "https://docs.sidestore.io/docs/faq and https://dev.to/1_king_0b1e1f8bfe6d1/how-ios-sideloading-actually-works-in-2025-dev-certs-altstore-and-the-eu-exception-1m2h"
+          },
+          {
+            "fact": "Recommendation: start with the free personal team (costs nothing, everything needed — keyboard extension, App Groups, Full Access — works on-device); buy the $99 program as soon as the keyboard becomes a daily driver, then install via 1-year Xcode/ad-hoc signing or TestFlight internal testing (90-day OTA builds); skip AltStore/SideStore since the dev has Xcode and source, making its only advantage (background re-signing of the same 7-day profiles) marginal against its extension/app-group risks",
+            "confidence": "high",
+            "source": "Synthesis of Apple docs, LoopDocs, AltStore/SideStore docs above"
+          }
+        ],
+        "open_questions": [
+          "Empirical check needed: does a keyboard extension installed via AltStore/SideStore (extensions kept) actually appear in Settings > Keyboards and accept the Full Access toggle? No authoritative confirmation found either way — test with a throwaway build before relying on it.",
+          "Apple's Supported capabilities (iOS) table renders its per-account checkmarks as images that don't survive scraping; visually verify in a browser (or just try adding App Groups to a personal-team target in Xcode) to confirm no capability needed here is unchecked for free accounts in the current revision.",
+          "Does the iOS 16+ 'Allow Paste' prompt fire correctly from within a keyboard-extension process with Full Access, and does the 'Paste from Other Apps > Allow' setting apply to the keyboard extension bundle, the containing app, or both? Affects clipboard-history capture design (background polling vs. paste-button capture).",
+          "Exact enforcement of the ~3-app install limit when deploying via Xcode personal team (as opposed to AltStore): whether extensions count toward it and what error Xcode surfaces (forum threads 745359/724896 suggest it exists but details are thin).",
+          "Whether iOS 17+ app-group container naming for personal teams triggers the 'kCFPreferencesAnyUser' cfprefsd detachment issue with group.* identifiers, and whether the team-ID-prefixed group naming convention is needed (developer forum thread 773700 / Xcode 15 reports).",
+          "Whether the reported paid-account friction points from one 2025 source (24-72h approval delay for newly registered UDIDs after the 10th, 14-day cooldown after certificate revocation) are accurate and current — only a single non-authoritative source found."
+        ]
+      }
+    },
+    "synthesis": {
+      "recommendations": {
+        "dev_account": "Start on the FREE personal team, with a planned upgrade to the $99/yr Apple Developer Program the moment the keyboard becomes your daily driver (realistically within 4-6 weeks). Rationale: everything this project needs — the keyboard extension point, RequestsOpenAccess/Full Access (an Info.plist key + user toggle, not a provisioned entitlement), and App Groups (listed as free-account-supported in Apple's capabilities table, corroborated by the LoopKit community building App-Group apps on free accounts) — works on free provisioning, so $0 gets you through layout, feel, and the clipboard architecture on your own iPhone. The free tier's real costs are the 7-day profile expiry (the keyboard literally dies weekly until you re-deploy from Xcode — a chore for a scratch project, unacceptable for the keyboard you type on all day), 3-device/10-App-ID limits (host + extension consume 2 IDs), and one unresolved conflict in the research about whether App Groups actually provisions on a personal team today. So: Milestone 0's first task is an empirical App Groups test on the free account; if it fails, buy the membership immediately instead of at daily-driver time. Skip AltStore/SideStore entirely — you have Xcode and source, they inherit the same 7-day limits, they rewrite app-group identifiers (a specific breakage risk for this architecture), and no first-hand reports confirm keyboards work through them. After upgrading: 1-year development signing or TestFlight internal builds (90-day expiry, OTA install) end the weekly ritual.",
+        "build_approach": "KeyboardKit-first hybrid, confirmed by a 1-2 day Milestone 0 spike. Primary path: KeyboardKit 10 free tier (closed-source binary via SPM, iOS 16+, 'free to start using' with no license key), because the free tier covers exactly the commodity 80% — the SwiftUI keyboard view, a dynamic layout engine that can express the Gboard geometry (custom rows, custom bottom row, number row, full restyling), input/action callouts, gestures, audio/haptic feedback, styling, and proxy utilities — while NONE of this project's differentiators are Pro-gated: the clipboard manager (App Group + Full Access + UIPasteboard), Gboard theming, and v1 autocorrect (UITextChecker + UILexicon + frequency dictionary) are all yours to build regardless of path. Pro at $50-500/mo is priced for businesses and buys nothing essential here (its autocomplete engine is replaceable, its emoji keyboard is deferred); Fleksy (~$269/mo B2B) is out; and neither framework nor Pro ships glide typing anyway, so scratch-building buys no glide advantage. From-scratch means re-implementing multi-touch slide-off handling, callout popups, shift/caps/delete-repeat logic, and layout math — research estimates 2-4x the calendar time to daily-drivable (2-4 months part-time even WITH a framework) with zero product upside for a solo personal build. Hedges against KeyboardKit 10's real risks (closed binary, single maintainer, undocumented license validation): the M0 spike must verify (a) the Gboard bottom row and 1.5x shift/backspace keys are expressible in the free layout engine, (b) no network license check misbehaves inside an extension, (c) steady-state memory fits the ~40MB budget; keep a pinned fork of MIT-licensed KeyboardKit 9.9.0 as the documented fallback (source-readable, forkable, iOS 15+), and keep KeyboardKit types behind thin adapters in your own code where cheap. azooKey (MIT, SwiftUI, actively maintained) is the reference codebase to study for anything the framework doesn't show you.",
+        "v1_scope": [
+          "Gboard 4-row QWERTY layout per AOSP LatinIME geometry: 10-key top row, 9-key centered home row (half-key inset), shift + zxcvbnm + backspace at ~1.5x letter width; bottom row [?123 15%] [comma 10%] [spacebar ~50% labeled 'English (US)'] [period 10%] [return ~15%]",
+          "Shift behavior: tap = shift next letter, double-tap = caps lock, auto-capitalization at sentence starts",
+          "Symbols layers: ?123 primary symbols page and =\\< secondary page, matching Gboard's layer-switch keys",
+          "Long-press system: accent callouts on letters, digit hints 1-0 on the top row (q-p), period long-press punctuation grid (~14 symbols), comma long-press mini-popup with settings gear; corner hint glyphs rendered on keys",
+          "Enlarged key-preview popup on keypress (Gboard 'Popup on keypress')",
+          "Backspace with repeat-on-hold and acceleration",
+          "Double-space inserts period + space; spacebar slide moves cursor left/right (via adjustTextPosition)",
+          "Suggestion strip with 3 candidates, middle slot = autocorrect applied on space; engine = UITextChecker (guesses/completions) + UILexicon via requestSupplementaryLexicon (contacts + text replacements) + bundled word-frequency dictionary; backspace immediately after a correction reverts it",
+          "CLIPBOARD MANAGER (the flagship — exceeds even Gboard iOS): opportunistic capture (read pasteboard on keyboard open, poll changeCount while visible, capture on host-app foreground), Recent + Pinned sections in a panel that replaces the keys, tap to insert at cursor, long-press to pin/delete, unpinned items auto-expire after 1 hour, pill-shaped paste chip in the suggestion bar after a fresh copy; text-only in v1; all data local in the App Group container, zero network",
+          "Idle-strip toolbar (simplified Gboard 2023 style): fixed slots for clipboard and settings in v1",
+          "Haptic feedback (UIImpactFeedbackGenerator) and key click sound (AudioServicesPlaySystemSound), both gated behind hasFullAccess with silent degradation",
+          "Gboard light + dark themes with key-border toggle; transparent background handling for iOS 26 Liquid Glass",
+          "Globe key shown only when needsInputModeSwitchKey is true, wired to handleInputModeList",
+          "Host app: onboarding checklist (add keyboard → enable Full Access → set 'Paste from Other Apps' to Allow), settings screen, full clipboard-history viewer/manager",
+          "App Group shared storage for clipboard + settings, with settings mirrored to local defaults using timestamp-based conflict resolution (writes from the extension are unreliable without Full Access)"
+        ],
+        "deferred": [
+          "Glide typing → v2. The single hardest feature: no open-source iOS implementation exists, KeyboardKit (free AND Pro) doesn't ship it, and the only credible open path is FUTO Swipe's C++ beam-search library (GPL — fine for personal use; small models fit the memory budget) which has never been ported to iOS. Deferring keeps v1 achievable; M6 runs the port spike.",
+          "Emoji keyboard + emoji search → deferred. Pro-gated in KeyboardKit, iOS 18/Xcode 16 broke multi-gesture buttons in scrollable emoji grids (known rewrite pain), and the system emoji keyboard remains one globe-tap away.",
+          "Image/screenshot clipboard capture → deferred. Images in the extension process are the fastest route to a jetsam kill under the ~60MB ceiling; text covers the overwhelming share of personal clipboard value.",
+          "Dedicated number row → v1.x. Off by default on Gboard Android anyway; top-row long-press digit hints cover it; trivial to add later with the layout engine.",
+          "Gesture delete (backspace slide-left word selection) → deferred with glide; it needs the same continuous-gesture engine work.",
+          "Themes engine / My Photos themes → deferred. One faithful Gboard light/dark pair serves a single user; a themes engine is Pro-gated in KeyboardKit and pure scope creep here.",
+          "One-handed mode, floating keyboard, Resize tool → polish for later; keyboard height tuning in v1 covers the ergonomic need.",
+          "Voice typing, translate, GIF search, G-button search → not planned. All require network/Google services, add Full Access privacy surface, and deliver low personal value; Gboard-iOS parity is exceeded without them.",
+          "Multilingual/locale layouts → out by decision (English-only v1); also the area where KeyboardKit free-tier coverage is most ambiguous.",
+          "App Store distribution → not a goal. Personal sideload/TestFlight only; if ever revisited, guidelines 4.4.1 (must work without Full Access, no key repurposing) and 5.1.1 (privacy policy) apply."
+        ]
+      },
+      "risks": [
+        {
+          "risk": "Jetsam silently kills the extension at ~60MB phys_footprint (reports 30-70MB, no crash log — the keyboard just vanishes mid-typing), and UIInputViewController instances leak per host app, so per-appearance allocations accumulate.",
+          "mitigation": "Hard budget: ≤40MB steady state, enforced by an Instruments/phys_footprint profiling pass as an exit criterion of every milestone. Memory-map the frequency dictionary (a documented 52MB→27MB win), avoid gradients/shadows/blur, keep clipboard text-only, lazy-load the clipboard panel and settings UI, empty heavy views on deinit, and test on the oldest device you'll actually use."
+        },
+        {
+          "risk": "Clipboard capture is inherently opportunistic — iOS has zero background clipboard monitoring, so anything copied between keyboard/app openings beyond the latest item is unrecoverable. The Android Gboard mental model ('everything I copy is in history') cannot be fully replicated.",
+          "mitigation": "Design for the trigger points that exist (keyboard open, changeCount polling while visible, host-app foreground — the same model Paste/PastePal use), dedupe by changeCount, and document the loss window as an accepted product limitation in PRODUCT.md so no future session tries to 'fix' it with an invented API. changeCount/hasStrings checks are prompt-free, so detection costs nothing."
+        },
+        {
+          "risk": "iOS 16+ pasteboard privacy: every value read can fire the 'Allow Paste' system alert, which would make capture unusable; whether 'Paste from Other Apps = Allow' on the containing app fully suppresses prompts for the extension on current iOS is unverified (confirmed for Paste through iOS 17/18).",
+          "mitigation": "Onboarding step 3 sets Settings > [host app] > Paste from Other Apps = Allow (Paste's docs confirm this covers both app and keyboard extension). M0/M3 include an on-device verification of prompt behavior from the extension process; if prompts persist on the installed iOS version, fall back to explicit capture (tap the paste chip to read) rather than automatic reads."
+        },
+        {
+          "risk": "Full Access is a single point of failure: without it there is no pasteboard, no haptics (silent no-op), no audio, and App Group WRITES from the extension are unreliable — and the toggle can be reset (e.g., after reinstalls during the free-account re-signing cycle).",
+          "mitigation": "Gate every dependent feature on hasFullAccess at runtime with graceful degradation (keyboard must always type). Mirror settings in both shared and local defaults with timestamp conflict resolution. Host-app onboarding shows a live status checklist so a lost toggle is visible in seconds, not discovered as 'clipboard mysteriously empty'."
+        },
+        {
+          "risk": "App Groups may not provision on a free personal team — Apple's capabilities table says it's supported and LoopKit builds prove similar setups, but one research thread flags it as entitlement-gated; without App Groups the clipboard architecture is dead on free provisioning.",
+          "mitigation": "Make it the very first M0 task: add the App Groups capability to both targets on the free team, write from the extension (Full Access on), read from the host app. If it fails, buy the $99 membership that day — it's already budgeted for the daily-driver milestone."
+        },
+        {
+          "risk": "7-day provisioning expiry on the free account: the keyboard stops working weekly, and if it lapses while you're away from the Mac, your daily keyboard is dead until you return — the worst possible failure mode for a keyboard.",
+          "mitigation": "While free: weekly Wi-Fi redeploy ritual (Xcode 'Connect via network', Cmd+R, ~5 min) with a recurring calendar reminder, and keep the system keyboard enabled as fallback. Structural fix: upgrade to the paid program at M5 (or earlier per the App Groups risk) for 1-year signing or 90-day TestFlight builds."
+        },
+        {
+          "risk": "Autocorrect quality will trail Gboard — Apple exposes no system autocorrect engine to extensions, and UITextChecker + UILexicon + a frequency dictionary is structurally weaker than Google's ML stack; this is the top reason third-party keyboards get abandoned.",
+          "mitigation": "Scope expectations explicitly in PRODUCT.md ('good enough, not Gboard-equal'). Use conservative correction thresholds (only correct on high confidence), always show the literal typed string as a tappable candidate, make backspace-after-space revert the correction, learn a personal dictionary into the App Group store, and iterate against your own real typing. Defer next-word prediction until correction feels safe."
+        },
+        {
+          "risk": "KeyboardKit 10 is a closed-source binary from a single maintainer with an undocumented license-validation mechanism (a network check would be fatal in a no-network extension context), and KeyboardKit 11 (iOS 17+) may reshuffle free-tier scope.",
+          "mitigation": "M0 spike explicitly tests the free tier offline inside an extension and measures its memory floor. Pin the exact SPM version and only bump deliberately (ADR required for major upgrades). Keep the MIT-licensed 9.9.0 fork documented as the fallback path, and route KeyboardKit APIs through thin adapters in code the project owns so a swap stays tractable."
+        },
+        {
+          "risk": "OS-version churn keeps breaking keyboard extensions: initial-height flicker persists into iOS 18/26, Xcode 16 broke scroll-view gestures, iOS 18 killed the selector-based openURL trick, and iOS 26 Liquid Glass renders opaque keyboards with a gray bar; plus the bizarre bundle-ID bug where extensions with ID segments starting 'se'/'mn' vanish from Settings.",
+          "mitigation": "CONSTRAINTS.md keeps a dated, sourced OS-gotcha ledger that every AI session must consult before proposing platform code. Use transparent backgrounds (iOS 26), SwiftUI Link for opening the host app, com.<name>.* reverse-DNS bundle IDs from day one, and never update the daily phone's iOS before testing the keyboard on a secondary device/simulator."
+        },
+        {
+          "risk": "Structural iOS limits mean the keyboard is sometimes simply unavailable (secureTextEntry/password and phone-pad fields force the system keyboard; banking apps can ban all custom keyboards) and document context is limited to roughly the last sentences — no full-document access.",
+          "mitigation": "Accept and document — these are non-fixable platform facts that belong in CONSTRAINTS.md so no session burns time on them. Keep the system keyboard configured for forced-fallback contexts, and design autocorrect/auto-caps to work from documentContextBeforeInput's limited window without assuming more."
+        }
+      ],
+      "doc_set": [
+        {
+          "filename": "CLAUDE.md",
+          "purpose": "AI-session grounding rules at the repo root — the contract every future Claude/AI session loads first, pointing to the authoritative docs and forbidding the hallucination patterns this platform invites.",
+          "outline": [
+            "Project one-liner: personal-use iOS keyboard extension replicating Android Gboard (layout, feel, clipboard manager); English-only; not for App Store",
+            "Reading order for a new session: README.md → the doc relevant to the task → docs/DECISIONS.md before proposing changes",
+            "Ground-truth rule: docs/CONSTRAINTS.md is the ONLY source for iOS platform capabilities; never assert an API/entitlement/limit not recorded there — say 'OPEN QUESTION, needs on-device test' instead of guessing",
+            "Decision authority: docs/DECISIONS.md is binding; changing a decision requires a new ADR, never a silent reversal in code",
+            "Hard invariants: two targets (host app + keyboard extension), com.<name>.* bundle IDs (never se./mn. prefixes), App Group ID defined in one shared constant, KeyboardKit pinned at exact version (major bumps need an ADR), extension memory budget ≤40MB",
+            "Platform tripwires (do-not list): never assume Full Access is on (gate on hasFullAccess), never write App Group data from the extension without checking access, never call UIPasteboard value-reads outside the capture pipeline (prompt risk), no network code in the extension, no opaque background (iOS 26), no selector-based openURL (use SwiftUI Link)",
+            "How to record new platform findings: append to CONSTRAINTS.md with source URL, date, confidence level, and on-device-verified flag",
+            "Session hygiene: prefer small verifiable steps; every milestone exit requires an on-device typing test and a memory profile"
+          ]
+        },
+        {
+          "filename": "README.md",
+          "purpose": "Project index and status snapshot — orients a human or AI in 60 seconds and maps the doc set.",
+          "outline": [
+            "What & why (one paragraph): Gboard's Android experience — especially clipboard history, which neither Gboard iOS (frozen at v2.3.19, 2022) nor Apple's keyboard offers — rebuilt as a personal iOS keyboard",
+            "Current status: active milestone, dev-account state (free/paid), device + iOS version being targeted",
+            "Doc map: table of every file in docs/ with one-line purpose and when to read it",
+            "Quick facts: targets, bundle IDs, App Group ID, KeyboardKit version pin, minimum iOS",
+            "Build & deploy: Xcode steps, Wi-Fi deploy, the weekly re-sign ritual (while on free account), onboarding steps on-device",
+            "Links: KeyboardKit docs/releases, AOSP LatinIME layout XML, azooKey reference repo"
+          ]
+        },
+        {
+          "filename": "docs/PRODUCT.md",
+          "purpose": "Product truth — what is being built and why, the parity matrix against real Gboard, and the explicit v1/deferred/never lines that stop scope drift.",
+          "outline": [
+            "Vision & success criteria: 'I use this keyboard all day by choice' — daily-drivable, Gboard-familiar, clipboard history that works",
+            "Reference products: Gboard Android (the blueprint — pin a version + capture reference screenshots), Gboard iOS 2.3.19 (frozen; what Google shipped and abandoned), Apple stock keyboard (baseline)",
+            "Parity matrix: feature-by-feature table — Gboard Android / Gboard iOS / Apple stock / this project (v1, v2, never) — including the headline fact that clipboard history exceeds anything available on iOS today",
+            "v1 feature list (the authoritative scope, mirrored from the roadmap): layout, long-press system, suggestions/autocorrect, clipboard manager, toolbar, feedback, themes, host app",
+            "Deferred features with reasons: glide typing (v2, FUTO Swipe path), emoji keyboard, image clipboard, number row, gesture delete, themes engine, one-handed/floating, voice/translate/GIF",
+            "Non-goals: multilingual, App Store distribution, any network feature, other users",
+            "Accepted product limitations (so nobody 'fixes' them): opportunistic clipboard capture with loss windows, autocorrect below Gboard quality, system keyboard takes over in secure/phone fields and banned apps, weekly re-sign while on free account"
+          ]
+        },
+        {
+          "filename": "docs/UI-SPEC.md",
+          "purpose": "The Gboard layout blueprint — concrete key geometry, states, long-press maps, and panel UX so implementation sessions build from numbers and tables, not vibes.",
+          "outline": [
+            "Layout grid: 4 rows; letter key width 10% (AOSP LatinIME reference); row 2 centered with half-key inset; shift/backspace 15% (~1.5x); key gaps, corner radius, and heights to be measured from reference screenshots (listed as measurement TODOs, not guesses)",
+            "Bottom row spec: [?123 15%] [comma 10%] [spacebar ~50%, labeled 'English (US)'] [period 10%] [return ~15%]; globe key inserted only when needsInputModeSwitchKey == true and what shifts to make room",
+            "Layers: base, shifted, caps-lock, ?123 symbols, =\\< extended symbols; per-layer key tables",
+            "Key states & touch behavior: pressed visuals, enlarged key-preview popup, slide-off cancellation, multi-touch rollover typing",
+            "Shift & caps: tap/double-tap/auto-capitalization state machine",
+            "Long-press map (per-key table): letter accent sets (e.g. e → é è ê ë …), top-row q-p → 1-0, period → punctuation grid (& % + # ! @ … ~14 symbols, grid order marked 'verify on device'), comma → mini-popup with settings gear; corner hint glyph rendering rules",
+            "Gestures: spacebar slide = cursor left/right (threshold + repeat behavior), double-space period timing window, backspace hold-repeat acceleration curve",
+            "Suggestion strip: 3 candidate slots, middle = autocorrect-on-space, literal-input candidate always available; idle-state toolbar with v1 fixed slots (clipboard, settings) and the paste-chip appearance rules after a copy",
+            "Clipboard panel: replaces key area; Recent + Pinned sections; item cell anatomy (preview text, age, pin state); tap = insert, long-press = pin/delete; empty and no-Full-Access states",
+            "Theming: Gboard light + dark palettes (concrete hex values), key-border toggle, iOS 26 Liquid Glass rule — transparent keyboard background, no opaque fills",
+            "Feedback: haptic style per key class, key click sound, both no-op without Full Access",
+            "Keyboard height per device class + the known initial-height flicker constraint and chosen mitigation",
+            "Open visual questions: exact Gboard dp values, punctuation-grid ordering, popup animation timings — each with a 'how to verify' note (screenshot measurement on an Android device)"
+          ]
+        },
+        {
+          "filename": "docs/ARCHITECTURE.md",
+          "purpose": "System design — targets, App Group data flow, the KeyboardKit integration boundary, and the pipelines (typing, autocorrect, clipboard) with the memory strategy that keeps the extension alive.",
+          "outline": [
+            "System overview: host app + keyboard extension (UIInputViewController, com.apple.keyboard-service) + App Group shared container; diagram of who reads/writes what and when",
+            "Targets & identity: bundle IDs (com.* rule and the se./mn. bug), Info.plist keys incl. RequestsOpenAccess=true, entitlements, single shared constant for the App Group ID",
+            "Framework layer: KeyboardKit 10 free tier, pinned version; what it owns (layout engine, callouts, gestures, feedback plumbing, styling) vs what we own (clipboard, autocorrect, theming values, toolbar, host app); thin-adapter boundary; fallback plan = MIT 9.9.0 fork (ADR-linked)",
+            "Data layer: App Group container layout; clipboard store schema (id, text, createdAt, pinned, sourceHint) — file-backed, memory-mappable; settings mirrored shared+local with timestamp conflict resolution because extension writes are unreliable without Full Access",
+            "Clipboard capture pipeline: trigger points (viewWillAppear, changeCount poll timer while visible, host-app foreground), prompt-free detection via changeCount/hasStrings, value read → dedupe → store → retention sweep (1h unpinned); failure behavior at each stage",
+            "Typing pipeline: key event → layer/state machine → textDocumentProxy (insertText/deleteBackward/adjustTextPosition); documentContextBeforeInput limits (~last sentences only) and what relies on it (auto-caps, double-space)",
+            "Autocorrect pipeline: input tap → candidate generation (UITextChecker guesses/completions + UILexicon + frequency dictionary ranking) → strip → commit-on-space → revert-on-backspace; personal dictionary learning into App Group store",
+            "Feedback subsystem: UIImpactFeedbackGenerator + AudioServicesPlaySystemSound, both behind hasFullAccess feature gates",
+            "Degradation matrix: behavior with Full Access off / host app never launched / App Group unavailable / secure field — the keyboard must always still type",
+            "Memory strategy: ≤40MB budget, mmap dictionaries, lazy panel construction, deinit hygiene for the UIInputViewController leak pattern, no heavy visual effects; profiling procedure (Instruments phys_footprint) as a milestone gate",
+            "Host app architecture: onboarding state machine (keyboard added → Full Access → Paste from Other Apps), settings screens, clipboard manager UI, SwiftUI Link for any keyboard→app opening"
+          ]
+        },
+        {
+          "filename": "docs/CONSTRAINTS.md",
+          "purpose": "The anti-hallucination reference — every hard iOS platform fact this project depends on, with source, date, confidence, and verified-on-device status; plus the open-questions backlog with test procedures.",
+          "outline": [
+            "How to use this doc: it is the only permissible source for platform claims in AI sessions; entry format = fact / source URL / date recorded / confidence (high-medium-low) / on-device-verified (yes-no)",
+            "Extension model: UIInputViewController in a keyboard-service extension inside a host app; fresh instance per host app; system swaps to previous keyboard on crash/kill",
+            "Full Access matrix: gates network, UIPasteboard, audio, haptics (silent no-op), reliable App Group writes; RequestsOpenAccess plist key + user toggle; check hasFullAccess; iOS 16 system-haptics setting does NOT apply to extensions",
+            "Memory: jetsam kill ~60MB phys_footprint (range 30-70MB, silent, no crash log); project budget 40MB; UIInputViewController retention/leak pattern",
+            "Pasteboard privacy: iOS 16 'Allow Paste' alert on value reads; changeCount/hasStrings/detectPatterns are prompt-free; per-app 'Paste from Other Apps' (16.1+) covers app + its keyboard (Paste precedent); NO background clipboard monitoring exists on iOS, period",
+            "Text APIs: textDocumentProxy verbs; documentContextBeforeInput returns only ~recent sentences, never full document; no system autocorrect access; available primitives = UITextChecker + requestSupplementaryLexicon (work without Full Access)",
+            "UI constraints: globe key only when needsInputModeSwitchKey (false on Face ID phones); height via constraint after first draw with known flicker; secure/phone-pad fields force system keyboard; host apps can ban custom keyboards",
+            "OS-gotcha ledger (dated): iOS 17.0-17.1 in-keyboard text field crash, 17.2-17.3.1 'se' bundle-ID disappearance, iOS 18/Xcode 16 scroll-gesture breakage + openURL selector removal, iOS 26 Liquid Glass transparent-background requirement, iOS 26.4 host-bundle-ID change",
+            "Accounts & provisioning: free team = 7-day profiles, 3 devices, 10 App IDs (host+ext = 2), Developer Mode required; App Groups free-team support (with the unresolved conflict flagged); paid = 1-year signing, TestFlight 90-day builds",
+            "App Review rules (recorded for a hypothetical future release, not v1): 4.4/4.4.1 (must type, must work without Full Access/network, next-keyboard method, no key repurposing), 5.1.1 privacy policy",
+            "Open questions / verification backlog: App Groups on free team (test procedure), paste-prompt behavior from extension on current iOS, playInputClick without Full Access, exact jetsam ceiling on target device, Liquid Glass runtime detection — each with how-to-test steps and a place to record the result"
+          ]
+        },
+        {
+          "filename": "docs/CLIPBOARD.md",
+          "purpose": "Feature spec for the flagship clipboard manager — the one feature no iOS keyboard from Google or Apple offers — spanning Gboard-reference behavior, iOS capture mechanics, permissions UX, data model, and acceptance tests.",
+          "outline": [
+            "Goal & reference behavior: Gboard Android clipboard (panel with Recent + Pinned, tap-to-insert, long-press pin, 1h auto-expiry for unpinned, paste chips in suggestion bar); note that Gboard iOS has none of this — this feature exceeds Google's own iOS offering",
+            "iOS capture model (the honest version): no background monitoring exists; capture triggers = keyboard open, changeCount poll while keyboard visible, host-app foreground; explicit loss-window statement (items copied between openings beyond the latest are gone)",
+            "Permissions & onboarding: Full Access (why + how), Settings > [app] > Paste from Other Apps = Allow (suppresses per-read prompts for app AND extension), the exact 3-step onboarding flow with live status detection",
+            "Data model & retention: text-only v1; item schema; dedupe by changeCount + content hash; unpinned expiry sweep at 1h (Gboard parity); pinned = indefinite; storage in App Group container; hard cap on item size and count to protect the memory budget",
+            "Panel UX: layout, Recent/Pinned sections, cell interactions, edit/multi-select (v1.x), empty/no-permission states (cross-reference UI-SPEC.md)",
+            "Paste chips: appearance rule after fresh copy, dismissal, insertion behavior",
+            "Privacy stance: 100% local, App Group only, no network path exists in the extension; sensitive-content note (password managers mark pasteboard items — respect UIPasteboard localOnly/expiration hints, listed as verify-on-device)",
+            "Edge cases: very large strings (truncate at cap), rapid successive copies, duplicate content, pasteboard cleared by system, Full Access revoked mid-life",
+            "Acceptance tests: scripted scenarios (copy in Safari → open keyboard → item appears; pin → survives 1h+; unpinned → gone after 1h; chip insert; prompt-free operation after onboarding)"
+          ]
+        },
+        {
+          "filename": "docs/ROADMAP.md",
+          "purpose": "Ordered milestones from empty folder to daily driver with concrete items and exit criteria — the session-to-session work queue.",
+          "outline": [
+            "Milestone overview table: M0-M6 with one-line goal and status",
+            "M0 Foundations & feasibility spike (items + exit criteria: typed 'hello' from own extension on device; App Groups verdict recorded; framework ADR closed)",
+            "M1 Typeable Gboard QWERTY (exit: daily-usable for plain typing)",
+            "M2 Gboard feel — long-press system, gestures, feedback (exit: layout indistinguishable from reference screenshots at a glance)",
+            "M3 Clipboard manager (exit: acceptance tests in CLIPBOARD.md pass on device)",
+            "M4 Suggestions & autocorrect (exit: a full day of typing without rage-disabling autocorrect)",
+            "M5 Daily-driver hardening + paid account upgrade (exit: default keyboard for 2 weeks, memory profile clean)",
+            "M6 v2 exploration: glide typing spike (FUTO Swipe), emoji, number row (explicitly optional)",
+            "Account upgrade trigger: buy $99 program at M5, or immediately if M0's App Groups test fails on the free team",
+            "Parking lot: ideas that surface mid-build land here, not in scope"
+          ]
+        },
+        {
+          "filename": "docs/DECISIONS.md",
+          "purpose": "ADR-style decision log — seeds the already-made decisions with their rationale so future sessions never relitigate or silently reverse them.",
+          "outline": [
+            "Format note: ADR-NNN / date / status (accepted, superseded) / context / decision / consequences; new ADRs append, never edit history",
+            "ADR-001: Gboard Android is the reference product (pin the version; iOS Gboard is frozen at 2.3.19 and lacks the clipboard manager entirely)",
+            "ADR-002: English-only v1 (cuts locale layouts/callouts — the area where framework free-tier coverage is weakest)",
+            "ADR-003: Build on KeyboardKit 10 free tier, not from scratch and not Pro — conditional on the M0 spike (layout expressiveness, offline license behavior, memory); fallback = pinned fork of MIT KeyboardKit 9.9.0; scratch rejected at 2-4x calendar cost with no product upside",
+            "ADR-004: Start on free personal team; upgrade to $99 program at daily-driver (M5) or immediately if App Groups fails to provision; AltStore/SideStore rejected (same 7-day limits, app-group rewriting risk, unproven for keyboards)",
+            "ADR-005: Clipboard manager requires Full Access + App Group; all data local-only; no network code in the extension ever",
+            "ADR-006: Text-only clipboard in v1 (images threaten the ~60MB jetsam ceiling)",
+            "ADR-007: Glide typing deferred to v2; only credible open path is FUTO Swipe's GPL C++ library (fine for personal use), pending an iOS port spike",
+            "ADR-008: Bundle IDs use com.<name>.* reverse-DNS (avoids the documented se./mn. extension-disappearance bugs); App Group ID looked up via a single shared constant",
+            "ADR-009: Autocorrect = UITextChecker + UILexicon + bundled frequency dictionary with conservative thresholds; accepting below-Gboard quality as a v1 truth",
+            "Template for future ADRs"
+          ]
+        }
+      ],
+      "roadmap": [
+        {
+          "milestone": "M0 — Foundations & feasibility spike (goal: kill the unknowns before writing product code; ~1 week)",
+          "items": [
+            "Create Xcode workspace: host app target + keyboard extension target, com.<name>.* bundle IDs, RequestsOpenAccess=true in the extension Info.plist",
+            "Provision and deploy to your iPhone on the free personal team (enable Developer Mode, trust profile, set up Wi-Fi deployment)",
+            "EMPIRICAL TEST 1 — App Groups on free team: add the capability to both targets, write from the extension with Full Access on, read from the host app; record verdict in CONSTRAINTS.md; if it fails, buy the $99 program now",
+            "EMPIRICAL TEST 2 — KeyboardKit 10 free-tier spike: render a keyboard, express the Gboard bottom row ([?123][,][space][.][return]) and 1.5x shift/backspace in the layout engine, confirm no license/network misbehavior inside the extension, measure baseline phys_footprint in Instruments",
+            "EMPIRICAL TEST 3 — pasteboard behavior: read UIPasteboard from the extension with Full Access on; verify 'Paste from Other Apps = Allow' suppresses the prompt on your iOS version; confirm changeCount polling is prompt-free",
+            "Decide framework variant (KK10 free tier vs 9.9.0 MIT fork) and close ADR-003; pin the version",
+            "Commit the full doc set (CLAUDE.md, README.md, docs/*) with M0 findings folded into CONSTRAINTS.md",
+            "Capture Gboard Android reference screenshots (layout, long-press popups, clipboard panel) for UI-SPEC measurement"
+          ]
+        },
+        {
+          "milestone": "M1 — Typeable Gboard QWERTY (goal: a keyboard you can actually write messages with)",
+          "items": [
+            "Implement the 4-row layout per UI-SPEC geometry: 10/9/7 letter rows with centered home row, 15% shift/backspace, AOSP bottom-row widths, spacebar labeled 'English (US)'",
+            "Layers: base, shifted, caps-lock, ?123 symbols, =\\< extended symbols with correct layer-switch keys",
+            "Shift state machine: tap, double-tap caps lock, auto-capitalization from documentContextBeforeInput",
+            "Backspace hold-repeat with acceleration; return key context labels",
+            "Globe key conditional on needsInputModeSwitchKey wired to handleInputModeList",
+            "Enlarged key-preview popup on press; slide-off cancellation",
+            "Gboard light + dark theme (concrete palette from UI-SPEC), transparent background for iOS 26",
+            "Exit criteria: type all day in Messages/Notes/Safari without falling back to the system keyboard for plain text; memory profile ≤40MB"
+          ]
+        },
+        {
+          "milestone": "M2 — Gboard feel: long-press, gestures, feedback (goal: muscle memory from Android transfers)",
+          "items": [
+            "Long-press callouts: accent sets on letters, q-p → 1-0 digit hints with corner glyphs, period → punctuation grid, comma → mini-popup with settings gear",
+            "Double-space period with correct timing window; revert on immediate backspace",
+            "Spacebar slide cursor control (left/right) via adjustTextPosition with Gboard-like thresholds",
+            "Haptic feedback + key click sound, gated on hasFullAccess with silent degradation",
+            "Keyboard height tuning per device; mitigate the initial-height flicker per CONSTRAINTS.md",
+            "Side-by-side screenshot comparison against the Android reference; fix visible deltas",
+            "Exit criteria: an Android Gboard user (you) reports no muscle-memory misses on layout or long-press"
+          ]
+        },
+        {
+          "milestone": "M3 — Clipboard manager (goal: the flagship feature works end-to-end; the reason this project exists)",
+          "items": [
+            "App Group clipboard store: schema, file-backed persistence, dedupe (changeCount + content hash), size/count caps",
+            "Capture pipeline: read on keyboard appear, changeCount poll while visible, capture on host-app foreground",
+            "Retention: 1-hour auto-expiry sweep for unpinned items; pinned persist indefinitely",
+            "Clipboard panel UI: toolbar clipboard button opens Recent + Pinned panel replacing the keys; tap inserts at cursor; long-press pin/delete; empty and no-Full-Access states",
+            "Paste chip in the suggestion strip after a fresh copy",
+            "Host app: full clipboard history viewer/manager + the 3-step onboarding flow (add keyboard → Full Access → Paste from Other Apps = Allow) with live status detection",
+            "Exit criteria: all CLIPBOARD.md acceptance tests pass on device with zero paste prompts after onboarding"
+          ]
+        },
+        {
+          "milestone": "M4 — Suggestions & autocorrect (goal: the strip earns its screen space)",
+          "items": [
+            "Suggestion strip UI: 3 candidate slots, middle = autocorrect slot, literal typed string always reachable; idle state = toolbar (clipboard + settings slots)",
+            "Candidate engine: UITextChecker guesses/completions + UILexicon (requestSupplementaryLexicon: contacts + text replacements) + bundled memory-mapped frequency dictionary for ranking",
+            "Autocorrect-on-space with conservative thresholds; backspace-after-correction reverts to literal input",
+            "Personal dictionary: learn accepted words into the App Group store; sync visible in host app",
+            "Tune against a week of your own typing; log misfires and adjust thresholds",
+            "Exit criteria: a full day of typing without wanting to disable autocorrect; memory still ≤40MB with dictionary loaded"
+          ]
+        },
+        {
+          "milestone": "M5 — Daily-driver hardening + paid account (goal: this is now your keyboard)",
+          "items": [
+            "Buy the $99 Apple Developer Program; move to 1-year development signing or TestFlight internal builds (90-day OTA) — retire the weekly re-sign ritual",
+            "Memory audit: Instruments pass across heavy usage (long sessions, panel open/close cycles, many host apps); fix the UIInputViewController retention leaks; verify against the oldest supported device",
+            "Edge-case sweep: secure/phone-pad field fallback, host apps that ban custom keyboards, orientation changes, Full Access toggled off mid-session, empty/cleared pasteboard",
+            "iOS-version check: verify visuals and gestures on the current iOS release (Liquid Glass background, height behavior); update the CONSTRAINTS.md gotcha ledger",
+            "Set as default keyboard; 2-week burn-in with an issue log; fix everything that made you switch back",
+            "Exit criteria: 14 consecutive days as the default keyboard with no jetsam vanishes and no fallback moments for plain typing"
+          ]
+        },
+        {
+          "milestone": "M6 — v2 exploration (optional, post-daily-driver)",
+          "items": [
+            "Glide typing spike: compile FUTO Swipe's C++ beam-search library for iOS/arm64, load its small models, measure memory headroom under the extension budget; SHARK2 template-matching as the non-ML fallback path; go/no-go ADR",
+            "Emoji keyboard: own implementation (Pro-gated in KeyboardKit) with the iOS 18 scroll-gesture constraints in mind, or continue relying on the system emoji keyboard",
+            "Number-row toggle and comma/period visibility settings (Gboard 16.0 parity)",
+            "Image/screenshot clipboard capture behind a memory-safety spike",
+            "Gesture delete (backspace slide) riding on the glide gesture engine if it lands",
+            "Revisit deferred list in PRODUCT.md; write ADRs for anything promoted into scope"
+          ]
+        }
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Synthesize"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:ios-constraints",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a2d3af49820d8b055",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1787313962896,
+      "queuedAt": 1787313962882,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "iOS custom keyboards are app extensions: a UIInputViewContr…",
+      "promptPreview": "You are a research agent. RESEARCH ONLY — do NOT create, edit, or write any files anywhere. First use ToolSearch with query \"select:WebSearch,WebFetch\" to load web tools, then research thoroughly with multiple searches and by fetching primary sources (Apple developer docs, official GitHub repos, Google support pages). Prefer information current as of 2025-2026 and note when something changed in a …",
+      "lastProgressAt": 1787314392802,
+      "tokens": 78927,
+      "toolCalls": 33,
+      "durationMs": 429904,
+      "resultPreview": "{\"summary\":\"iOS custom keyboards are app extensions: a UIInputViewController subclass in a keyboard-extension target embedded in a host (containing) app, with NSExtensionPointIdentifier com.apple.keyboard-service. Data sharing with the host app uses App Groups (UserDefaults(suiteName:)/shared container). Critically, without Full Access the extension can generally READ the shared container but writ…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:gboard-spec",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a39573e0d64fe2aa6",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1787313962897,
+      "queuedAt": 1787313962882,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Gboard Android (the blueprint): a 4-row QWERTY plus functio…",
+      "promptPreview": "You are a research agent. RESEARCH ONLY — do NOT create, edit, or write any files anywhere. First use ToolSearch with query \"select:WebSearch,WebFetch\" to load web tools, then research thoroughly with multiple searches and by fetching primary sources (Apple developer docs, official GitHub repos, Google support pages). Prefer information current as of 2025-2026 and note when something changed in a …",
+      "lastProgressAt": 1787314499358,
+      "tokens": 80622,
+      "toolCalls": 39,
+      "durationMs": 534434,
+      "resultPreview": "{\"summary\":\"Gboard Android (the blueprint): a 4-row QWERTY plus function row. Rows: 10 keys (q-p), 9 keys (a-l) centered with half-key inset, then shift + zxcvbnm + backspace, where shift/backspace are ~1.5x a letter key (AOSP LatinIME, Gboard's visual ancestor, uses 10%-width letter keys, 15% shift/delete). Bottom row: [?123 15%] [comma 10%] [spacebar ~50%, labeled with the language, e.g. \\\"Engli…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "research:build-approach",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a2e1f9814ed84ea4d",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1787313962898,
+      "queuedAt": 1787313962882,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "KeyboardKit is the only serious iOS keyboard framework, but…",
+      "promptPreview": "You are a research agent. RESEARCH ONLY — do NOT create, edit, or write any files anywhere. First use ToolSearch with query \"select:WebSearch,WebFetch\" to load web tools, then research thoroughly with multiple searches and by fetching primary sources (Apple developer docs, official GitHub repos, Google support pages). Prefer information current as of 2025-2026 and note when something changed in a …",
+      "lastProgressAt": 1787314366142,
+      "tokens": 75419,
+      "toolCalls": 40,
+      "durationMs": 401217,
+      "resultPreview": "{\"summary\":\"KeyboardKit is the only serious iOS keyboard framework, but its licensing changed fundamentally in late 2025: KeyboardKit 10 (final ~Sept 2025; v10.8.1 shipped Aug 20, 2026) merged the formerly MIT open-source core and the commercial Pro SDK into ONE closed-source, precompiled binary XCFramework distributed via SPM, requiring iOS 16+ and depending on LicenseKit. The last fully open-sou…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "research:distribution",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ab11ce1955edb61df",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1787313962898,
+      "queuedAt": 1787313962882,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Free Apple ID \"personal team\" provisioning remains fully vi…",
+      "promptPreview": "You are a research agent. RESEARCH ONLY — do NOT create, edit, or write any files anywhere. First use ToolSearch with query \"select:WebSearch,WebFetch\" to load web tools, then research thoroughly with multiple searches and by fetching primary sources (Apple developer docs, official GitHub repos, Google support pages). Prefer information current as of 2025-2026 and note when something changed in a …",
+      "lastProgressAt": 1787314415317,
+      "tokens": 75307,
+      "toolCalls": 32,
+      "durationMs": 450392,
+      "resultPreview": "{\"summary\":\"Free Apple ID \\\"personal team\\\" provisioning remains fully viable for this project in 2025-2026, and — critically — keyboard extensions work with it. A custom keyboard needs no paid-only entitlement: the keyboard target itself requires nothing special, RequestsOpenAccess (Full Access) is an Info.plist key plus a user toggle in Settings (not a provisioned entitlement), and App Groups — …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "synthesize:plan-design",
+      "phaseIndex": 2,
+      "phaseTitle": "Synthesize",
+      "agentId": "acf448744bb0dea33",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1787314499375,
+      "queuedAt": 1787314499361,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "You are a senior iOS product architect. RESEARCH/PLANNING ONLY — do NOT create or edit any files.\n\nProject: \"the Keyboard Project\" — a solo developer's personal-use iOS custom keyboard that replicates the Android Gboard layout, feel, and features (especially the clipboard manager) on iPhone. Decisions already made by the owner: Gboard is the reference keyboard; English-only v1; build approach is \"…",
+      "lastProgressAt": 1787314808483,
+      "tokens": 58386,
+      "toolCalls": 1,
+      "durationMs": 309108,
+      "resultPreview": "{\"recommendations\":{\"dev_account\":\"Start on the FREE personal team, with a planned upgrade to the $99/yr Apple Developer Program the moment the keyboard becomes your daily driver (realistically within 4-6 weeks). Rationale: everything this project needs — the keyboard extension point, RequestsOpenAccess/Full Access (an Info.plist key + user toggle, not a provisioned entitlement), and App Groups (l…"
+    }
+  ],
+  "totalTokens": 368661,
+  "totalToolCalls": 145
+}
