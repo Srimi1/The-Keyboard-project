@@ -10,9 +10,9 @@
 
 | Milestone | Goal | Status |
 |---|---|---|
-| **M0** | Foundations & feasibility spike | **← current** |
-| M1 | Typeable Gboard QWERTY | not started |
-| M2 | Gboard feel — long-press, gestures, feedback | not started |
+| M0 | Foundations & feasibility spike | code done, 3 device tests open |
+| M1 | Typeable Gboard QWERTY | code done, device verification open |
+| M2 | Gboard feel — long-press, gestures, feedback | **← current** |
 | M3 | Clipboard manager | not started |
 | M4 | Suggestions & autocorrect | not started |
 | M5 | Daily-driver hardening + paid account | not started |
@@ -80,17 +80,19 @@ side-by-side comparison below can be done without switching keyboards
 **Goal: muscle memory transfers.** This is the milestone that decides whether it *feels* like Android or merely *looks* like it.
 
 **Items**
-- Long-press system ([UI-SPEC.md](UI-SPEC.md) §5): accent callouts, q–p → 1–0 digit hints with corner glyphs, period → punctuation grid, comma → settings-gear mini-popup.
-- Double-space → period with the correct timing window; immediate backspace reverts.
-- Spacebar slide cursor control via `adjustTextPosition` with Gboard-like thresholds (§6).
-- Haptics + key click sound, gated on `hasFullAccess`, silent degradation (C-07, C-08).
-- Resolve the remaining 📐 MEASURE items from the reference screenshots — especially **V-06, the period long-press grid contents and ordering**.
-- Side-by-side screenshot comparison; fix every visible delta.
+- ✅ Long-press callouts ([UI-SPEC.md](UI-SPEC.md) §5): accents, top-row digit hints as the leading option, period → punctuation grid. Slide to choose, release to insert.
+- ⬜ Comma → settings-gear popup. **Deliberately not built**: reaching the host app needs SwiftUI `Link` (C-48), which a UIKit-driven callout cannot host. Needs a different approach, not a missing implementation.
+- ✅ Double-space → period on the sourced 1100 ms window; immediate backspace restores the two spaces.
+- ✅ Spacebar slide cursor control via `adjustTextPosition` (§6). Step distance is still 📐 MEASURE.
+- ✅ Haptics + key click, gated on `hasFullAccess` with silent degradation (C-07, C-08). Click audibility is **Q-03, unverified**.
+- ⬜ Replace the working accent sets and punctuation grid with AOSP's `donottranslate-more-keys.xml` — order matters as much as contents.
+- ⬜ Resolve the remaining 📐 MEASURE items from reference screenshots — especially **V-06, the period grid's contents and ordering**.
+- ⬜ Side-by-side screenshot comparison; fix every visible delta.
 
 **Exit criteria**
-- ✅ You (the Android Gboard user) report **no muscle-memory misses** on layout or long-press over a full day.
-- ✅ All V-01…V-08 measurements resolved and reflected in UI-SPEC.md.
-- ✅ ≤ 40 MB.
+- ⬜ You (the Android Gboard user) report **no muscle-memory misses** on layout or long-press over a full day. *(needs a device)*
+- ⬜ All V-01…V-08 measurements resolved and reflected in UI-SPEC.md. *(blocked on the M0 screenshots)*
+- ⬜ ≤ 40 MB.
 
 ---
 

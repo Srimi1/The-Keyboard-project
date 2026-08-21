@@ -14,7 +14,7 @@ Nobody fixes this. **Gboard for iOS is frozen at v2.3.19 (May 2022)** — Google
 
 | | |
 |---|---|
-| **Phase** | **M1 — Typeable Gboard QWERTY** (M0 tests still pending hardware) |
+| **Phase** | **M2 — Gboard feel** (M0 tests + reference screenshots still pending hardware) |
 | **Docs written** | 2026-08-21 |
 | **Project scaffolded** | 2026-08-21 — builds clean, runs in the simulator |
 | **Dev account** | Free personal team (upgrade to $99/yr at M5 — [ADR-004](docs/DECISIONS.md)) |
