@@ -15,6 +15,9 @@ final class DiagnosticsRunner: ObservableObject {
     @Published private(set) var reportSaveSucceeded: Bool?
     @Published private(set) var pasteboard: DiagnosticsReport.PasteboardProbe?
     @Published private(set) var memoryMB: Double = 0
+    /// The jetsam ceiling as the kernel reports it for this process — the actual answer to
+    /// Q-04, rather than the ~60 MB figure inferred from third-party reports.
+    @Published private(set) var measuredCeilingMB: Double?
     @Published private(set) var lastRunAt: Date?
 
     private var memoryTimer: Timer?
@@ -35,11 +38,13 @@ final class DiagnosticsRunner: ObservableObject {
     }
 
     func refreshMemory() {
-        memoryMB = MemoryReporter.physFootprintMB() ?? 0
+        guard let reading = MemoryReporter.read() else { return }
+        memoryMB = reading.physFootprintMB
+        measuredCeilingMB = reading.jetsamLimitMB
     }
 
     var memoryVerdict: MemoryReporter.Verdict {
-        MemoryReporter.verdict(forMB: memoryMB)
+        MemoryReporter.verdict(forMB: memoryMB, ceilingMB: measuredCeilingMB)
     }
 
     // MARK: - Test 1: App Groups + report round trip (Q-01)
@@ -88,17 +93,37 @@ final class DiagnosticsRunner: ObservableObject {
             valueReadAttempted: false,
             valueReceived: false,
             characterCount: nil,
-            readDurationMS: nil
+            readDurationMS: nil,
+            hadFullAccess: nil
         )
     }
 
     /// Reads the actual pasteboard value — **this is the call that can prompt** (C-14).
-    /// User-initiated only. Timing it is the only available signal for whether the prompt
-    /// appeared, since iOS exposes none (Q-05).
+    /// User-initiated only.
+    ///
+    /// Two things make this deliberately different from the M3 capture pipeline:
+    /// it runs on the main actor, which freezes the keyboard for as long as the alert is up
+    /// (acceptable for a button the user tapped knowing it may prompt, but M3 must move the
+    /// read off the main thread), and it records `hasFullAccess` because without it the
+    /// sandbox blocks the pasteboard outright and the result would otherwise read as "empty".
     func readPasteboardValue(hasFullAccess: Bool) {
         let general = UIPasteboard.general
         let changeCount = general.changeCount
         let hasStrings = general.hasStrings
+
+        guard hasFullAccess else {
+            pasteboard = DiagnosticsReport.PasteboardProbe(
+                changeCount: changeCount,
+                hasStrings: hasStrings,
+                valueReadAttempted: true,
+                valueReceived: false,
+                characterCount: nil,
+                readDurationMS: nil,
+                hadFullAccess: false
+            )
+            runSafeProbesPreservingPasteboard(hasFullAccess: false)
+            return
+        }
 
         let start = Date()
         let value = general.string
@@ -110,7 +135,8 @@ final class DiagnosticsRunner: ObservableObject {
             valueReadAttempted: true,
             valueReceived: value != nil,
             characterCount: value?.count,
-            readDurationMS: elapsedMS
+            readDurationMS: elapsedMS,
+            hadFullAccess: true
         )
 
         runSafeProbesPreservingPasteboard(hasFullAccess: hasFullAccess)

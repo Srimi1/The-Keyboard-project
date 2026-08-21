@@ -40,19 +40,39 @@ struct DiagnosticsReport: Codable, Equatable {
     struct PasteboardProbe: Codable, Equatable {
         /// Prompt-free (C-16).
         var changeCount: Int
-        /// Prompt-free (C-16).
+        /// Prompt-free (C-16). Load-bearing: it is what separates "Deny" from "empty" below.
         var hasStrings: Bool
-        /// The prompting call (C-14) — nil when it was skipped.
+        /// The prompting call (C-14) — false when it was skipped.
         var valueReadAttempted: Bool
         var valueReceived: Bool
         var characterCount: Int?
-        /// Wall-clock of the value read. A fast return means no prompt appeared;
-        /// multi-second means the user had to tap "Allow" (Q-05 has no programmatic signal).
+        /// Wall-clock of the value read. iOS exposes no programmatic signal for whether the
+        /// alert appeared (Q-05), so timing is the only evidence available.
         var readDurationMS: Double?
+        /// False when the read was skipped because Full Access was off — without it the
+        /// sandbox blocks the pasteboard entirely, which would otherwise look like "empty".
+        var hadFullAccess: Bool?
 
-        var promptLikelyAppeared: Bool? {
-            guard valueReadAttempted, let ms = readDurationMS else { return nil }
-            return ms > 400
+        /// What the numbers above actually mean.
+        enum Outcome: String {
+            case notRun = "not run"
+            case blockedNoFullAccess = "blocked — Full Access is off"
+            case allowedSilently = "allowed silently — no prompt"
+            case likelyPrompted = "prompt appeared — slow read"
+            case deniedBySetting = "denied — 'Paste from Other Apps' is not Allow"
+            case pasteboardEmpty = "pasteboard is empty"
+        }
+
+        /// A fast nil is ambiguous on its own: it means either the Deny setting or an empty
+        /// pasteboard. `hasStrings` is prompt-free and separates them — without that
+        /// cross-check a Deny would be misread as "nothing copied".
+        var outcome: Outcome {
+            guard valueReadAttempted else { return .notRun }
+            if hadFullAccess == false { return .blockedNoFullAccess }
+            guard let ms = readDurationMS else { return .notRun }
+            if ms > 400 { return .likelyPrompted }
+            if valueReceived { return .allowedSilently }
+            return hasStrings ? .deniedBySetting : .pasteboardEmpty
         }
     }
 }

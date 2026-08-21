@@ -33,6 +33,14 @@ All facts below recorded **2026-08-21** from the research corpus in [`reference/
   `Source:` local build + run, iOS 26.5 simulator · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` **yes**
 - **C-34** — A `TextField` in the **host app** focused while a custom keyboard is active is unremarkable; the documented iOS 17.0–17.1 crash (§8) applies to a text field **inside the keyboard extension**, which this project does not use.
   `Source:` §8 ledger, scoped by reading · `Recorded:` 2026-08-21 · `Confidence:` medium · `Verified:` no
+- **C-41** — **Do not read `hasFullAccess` in `viewDidLoad`.** Its sibling `needsInputModeSwitchKey` logs that it "was called before a connection was established to the host application. This will produce an inaccurate result", and in UIKitCore that message is parameterized by selector rather than specific to one property. Apple documents no guarantee either way. Read both in `viewWillAppear`, and re-read on every appearance — **there is no notification or KVO path for Full Access changing**, so polling is the only option.
+  `Source:` verification agent against UIKitCore · `Recorded:` 2026-08-21 · `Confidence:` medium · `Verified:` no
+- **C-42** — `ENABLE_DEBUG_DYLIB` defaults to **YES** for the app-extension product type in Xcode 16+/26. It is required only for SwiftUI Previews and is a known source of missing `.debug.dylib` load failures, invalid-code-signature errors on the simulator, and missing dSYMs — all of which present as "the keyboard doesn't work" with nothing useful to debug. **Set it to NO on the extension target** (done in `project.yml`); the extension then builds as a single binary.
+  `Source:` verification agent + confirmed locally by inspecting the built `.appex` before and after · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` **yes** (build)
+- **C-43** — The name shown under Settings → General → Keyboard → Keyboards comes from the **extension** target's `CFBundleDisplayName`, not the app's. Omit it and iOS shows the containing app's `CFBundleName` or an "&lt;App&gt; — &lt;Extension&gt;" compound. Set explicitly (done: "Keyboard Project").
+  `Source:` verification agent · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
+- **C-44** — The extension's bundle ID **must** be a child of the host app's; the system will not register a keyboard whose ID is not prefixed by its containing app's. Also: sharing source files between the two targets means each compiles its own copy, so `KeyboardProject.Foo` and `KeyboardExtension.Foo` are **different types**. `Codable`/JSON round-trips fine across the boundary (what this project uses); `NSCoding`/`NSKeyedArchiver` embeds the module name and would fail.
+  `Source:` verification agent · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
 
 ## 2. Full Access matrix
 
@@ -53,11 +61,15 @@ All facts below recorded **2026-08-21** from the research corpus in [`reference/
   `Source:` dev.to article (C-02) + React Native issue #31910 (~48 MB reports) · `Confidence:` medium · `Verified:` no — see Q-04
 - **C-11** — SwiftUI works inside keyboard extensions (KeyboardKit is fully SwiftUI-based), but adds memory overhead against the ceiling.
   `Source:` https://github.com/KeyboardKit/KeyboardKit · `Confidence:` high · `Verified:` no
+- **C-36** — **The jetsam ceiling is measurable, not just estimable.** `task_vm_info`'s `limit_bytes_remaining` (struct revision 4+) reports how many bytes this process has left before its own jetsam limit, so `phys_footprint + limit_bytes_remaining` is the **actual ceiling on this device** — which answers Q-04 directly instead of relying on the ~60 MB figure from third-party reports. Caveats: `TASK_VM_INFO_COUNT` **cannot be imported into Swift** (the macro uses `sizeof`; referencing it is a hard compile error) and must be recomputed via `MemoryLayout`; the divisor is `natural_t` but the buffer must be rebound to `integer_t` (`task_info_t == UnsafeMutablePointer<integer_t>`); and `task_info` writes back how many ints it filled — **below revision 1 the `phys_footprint` field is uninitialized garbage rather than an error**, so the returned count must be checked. `limit_bytes_remaining` also stays 0 if the deployment target is below iOS 13 (the kernel gates on `proc_min_sdk`, not the linked SDK); iOS 16 is fine.
+  `Source:` verification agent against iOS 26.5 SDK headers, XNU source, and a compiled+executed test · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` partial (compiles and runs; the on-device number is what closes Q-04)
 
 ## 4. App Group read/write asymmetry
 
 - **C-12** — Without Full Access, App Group shared-container **reads generally work but writes fail or are unreliable**. Production keyboards mirror preferences in both shared and local defaults with timestamp conflict resolution.
   `Source:` dev.to article (C-02) + https://www.securing.pl/en/third-party-iphone-keyboards-vs-your-ios-application-security/ · `Confidence:` medium · `Verified:` no
+- **C-35** — ⚠️ **The App Group false-positive trap.** `UserDefaults(suiteName:)` returns a **non-nil** instance for a group the process is *not* entitled to, and an in-process write/read-back **succeeds off the in-process cache**. `synchronize()` also returns true for a bogus suite. So a diagnostics check built that way reports a pass on a completely unprovisioned group. **The reliable entitlement signal is `FileManager.containerURL(forSecurityApplicationGroupIdentifier:) == nil`** (iOS processes are always sandboxed). Proof the group is genuinely *shared* requires a **cross-process token** — one process writes, the other reads.
+  `Source:` verification agent against iOS 26.5 SDK headers + empirical test · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no (design applied in `AppGroup.probeAvailability`)
 
 ## 5. Pasteboard privacy (the clipboard manager's rulebook)
 
@@ -71,6 +83,14 @@ All facts below recorded **2026-08-21** from the research corpus in [`reference/
   `Source:` sarunw.com (C-14) + https://sentinelden.com/blog/pasteboard-detection-without-banner/ · `Confidence:` medium · `Verified:` no
 - **C-17** — Gboard for iOS does **not** include Android Gboard's clipboard-history feature; Apple's stock keyboard has none either; iOS holds a single system-wide clipboard item. (This project's clipboard manager exceeds anything available on iOS.)
   `Source:` https://support.google.com/websearch/thread/105849467 + https://clipboardai.app/blog/articles/iphone-vs-android-clipboard-war · `Confidence:` high (medium for the Gboard-iOS specifics) · `Verified:` no
+- **C-37** — **A fast `nil` from a pasteboard read is ambiguous.** "Paste from Other Apps = **Deny**" returns nil *quickly and with no prompt* — indistinguishable from an empty pasteboard unless the prompt-free `hasStrings` is checked first. Interpretation: slow → prompt appeared; fast + value → allowed; fast + nil + `hasStrings` → **Deny**; fast + nil + no strings → genuinely empty.
+  `Source:` verification agent · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
+- **C-38** — **The pasteboard read blocks the calling thread while the alert is displayed.** On the main thread in a keyboard extension this visibly freezes the keyboard for as long as the user takes to tap. Chromium moved this off the main thread for exactly this reason. → M3's capture pipeline must not read on the main thread.
+  `Source:` verification agent · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
+- **C-39** — Without Full Access the extension cannot reach the general pasteboard **at all** — the sandbox denies the connection. Ungated pasteboard diagnostics therefore report a confusing "empty" instead of a clear "blocked".
+  `Source:` verification agent · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
+- **C-40** — API naming traps: `detectPatterns(for:completionHandler:)` is **deprecated since iOS 15**; the current async spelling is `detectedPatterns` (past tense). `detectValues` / `detectedValues` **do trigger the prompt** even though the `Patterns` variants do not — one character apart, opposite privacy consequence. `UIPasteboard.pasteboardTypes` does not exist in Swift; it is `types`.
+  `Source:` verification agent against the UIKit Swift overlay · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` no
 
 ## 6. Text APIs
 

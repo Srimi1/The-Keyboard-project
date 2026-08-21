@@ -42,35 +42,33 @@ enum AppGroup {
         }
     }
 
-    /// Writes a probe value and reads it back to distinguish "entitlement missing"
-    /// from "write silently failed". This is the M0 Test 1 primitive (Q-01).
+    /// Distinguishes "entitlement missing" from "write silently failed" (Q-01).
+    ///
+    /// ⚠️ The trap this deliberately avoids: `UserDefaults(suiteName:)` returns a **non-nil**
+    /// instance for a group you are not entitled to, and an in-process write/read-back
+    /// **succeeds off the in-process cache** — so a panel that "verifies" App Groups that way
+    /// reports a pass on a completely unprovisioned group. `containerURL` returning nil is the
+    /// reliable entitlement signal, because iOS processes are always sandboxed.
+    ///
+    /// Even this only proves the entitlement provisioned for *this* process. Proof that the
+    /// group is genuinely **shared** requires a cross-process token — which is what the
+    /// keyboard-writes / host-app-reads report round trip provides (`DiagnosticsStore`).
     static func probeAvailability() -> Availability {
         guard let container = containerURL else {
             return .unavailable("containerURL(forSecurityApplicationGroupIdentifier:) returned nil")
         }
 
-        // File-container round trip — the strongest signal, since UserDefaults can
-        // return a usable-looking suite that silently drops writes.
         let probeURL = container.appendingPathComponent("appgroup-probe.txt")
         let token = UUID().uuidString
         do {
-            try token.write(to: probeURL, atomically: true, encoding: .utf8)
-            let readBack = try String(contentsOf: probeURL, encoding: .utf8)
+            try Data(token.utf8).write(to: probeURL, options: .atomic)
+            let readBack = String(decoding: try Data(contentsOf: probeURL), as: UTF8.self)
+            try? FileManager.default.removeItem(at: probeURL)
             guard readBack == token else {
                 return .readOnly("file wrote but read back a different value")
             }
         } catch {
             return .readOnly("file write failed: \(error.localizedDescription)")
-        }
-
-        // UserDefaults round trip — what settings mirroring depends on.
-        guard let defaults else {
-            return .readOnly("UserDefaults(suiteName:) returned nil")
-        }
-        let key = "appgroup.probe"
-        defaults.set(token, forKey: key)
-        guard defaults.string(forKey: key) == token else {
-            return .readOnly("UserDefaults write did not read back")
         }
 
         return .working

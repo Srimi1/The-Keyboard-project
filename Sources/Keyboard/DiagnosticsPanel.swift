@@ -55,16 +55,16 @@ struct DiagnosticsPanel: View {
                     row("hasStrings", probe.hasStrings ? "yes" : "no")
 
                     if probe.valueReadAttempted {
-                        verdictRow("Value read", value: probe.valueReceived ? "received \(probe.characterCount ?? 0) chars" : "nil", ok: probe.valueReceived)
+                        verdictRow(
+                            "Verdict",
+                            value: probe.outcome.rawValue,
+                            ok: probe.outcome == .allowedSilently
+                        )
+                        if probe.valueReceived {
+                            row("Received", "\(probe.characterCount ?? 0) chars")
+                        }
                         if let ms = probe.readDurationMS {
                             row("Read took", String(format: "%.0f ms", ms))
-                        }
-                        if let prompted = probe.promptLikelyAppeared {
-                            verdictRow(
-                                "Prompt appeared?",
-                                value: prompted ? "LIKELY — slow read" : "no — fast read",
-                                ok: !prompted
-                            )
                         }
                     } else {
                         Text("Prompt-free probes only. The value read is the call that can prompt.")
@@ -89,12 +89,19 @@ struct DiagnosticsPanel: View {
 
                 divider
 
-                sectionTitle("Memory (C-10)")
+                sectionTitle("Memory (C-10, Q-04)")
                 verdictRow(
                     "phys_footprint",
                     value: String(format: "%.1f MB / %.0f MB budget", runner.memoryMB, MemoryReporter.budgetMB),
                     ok: runner.memoryVerdict == .withinBudget
                 )
+                if let ceiling = runner.measuredCeilingMB {
+                    row("Jetsam limit (measured)", String(format: "%.0f MB", ceiling))
+                } else {
+                    Text("Kernel did not report limit_bytes_remaining — falling back to the ~60 MB estimate.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.hintGlyph)
+                }
 
                 divider
 

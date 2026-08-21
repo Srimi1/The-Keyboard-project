@@ -73,13 +73,24 @@ final class HostDiagnostics: ObservableObject {
         return value ? .done : .failed
     }
 
-    /// Step 3 — no API exposes this setting, so it is inferred from whether the keyboard's
-    /// pasteboard read returned fast (no prompt) or slow (the user had to tap Allow) — the
-    /// only signal available (Q-05).
+    /// Step 3 — no API exposes this setting, so it is inferred from the keyboard's timed read
+    /// cross-checked against the prompt-free `hasStrings` (Q-05).
     var pasteWithoutPromptStatus: StepStatus {
-        guard let probe = keyboardReport?.pasteboard, probe.valueReadAttempted else { return .unknown }
-        guard let prompted = probe.promptLikelyAppeared else { return .unknown }
-        return prompted ? .failed : .done
+        guard let probe = keyboardReport?.pasteboard else { return .unknown }
+        switch probe.outcome {
+        case .allowedSilently:
+            return .done
+        case .likelyPrompted, .deniedBySetting, .blockedNoFullAccess:
+            return .failed
+        // An empty pasteboard says nothing about the setting — copy something and retry.
+        case .pasteboardEmpty, .notRun:
+            return .unknown
+        }
+    }
+
+    /// The keyboard's own reading of what the outcome was, for display.
+    var pasteboardOutcome: String? {
+        keyboardReport?.pasteboard.map(\.outcome.rawValue)
     }
 
     /// The decisive M0 verdict (Q-01).
