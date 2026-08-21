@@ -99,23 +99,41 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func applyKeyboardHeight() {
-        let rowCount = CGFloat(model.rows.count)
-        let height = rowCount * KeyboardTheme.keyRowHeight
-            + (rowCount - 1) * KeyboardTheme.rowSpacing
-            + KeyboardTheme.keyboardVerticalPadding * 2
-            + KeyboardTheme.diagnosticsBarHeight
+        // Width is always system-set; only height is ours to choose (C-22). Deriving it from
+        // the actual width keeps key proportions constant across device classes.
+        let width = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width
+        let height = KeyboardMetrics.preferredKeyboardHeight(
+            rowCount: model.rows.count,
+            width: width,
+            stripHeight: KeyboardTheme.diagnosticsBarHeight
+        )
 
         if let heightConstraint {
+            guard abs(heightConstraint.constant - height) > 0.5 else { return }
             heightConstraint.constant = height
             return
         }
 
         let constraint = view.heightAnchor.constraint(equalToConstant: height)
-        // Just below required so it cannot conflict with the system's own layout pass
-        // while the input view is still settling (C-22).
+        // Just below required: at required it conflicts with the system's own
+        // UIView-Encapsulated-Layout-Height and spams constraint-breakage logs (C-45).
         constraint.priority = UILayoutPriority(999)
         constraint.isActive = true
         heightConstraint = constraint
+    }
+
+    /// The 0×0 → fullscreen → settling pass means the width we sized against can change
+    /// after the first layout, and rotation changes it again.
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.applyKeyboardHeight()
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if heightConstraint != nil { applyKeyboardHeight() }
     }
 }
 

@@ -66,11 +66,11 @@ struct KeyboardPreviewView: View {
 
     /// Matches what the extension asks for, so the proportions on screen are the real ones.
     private var previewHeight: CGFloat {
-        let rowCount = CGFloat(model.rows.count)
-        return rowCount * KeyboardTheme.keyRowHeight
-            + (rowCount - 1) * KeyboardTheme.rowSpacing
-            + KeyboardTheme.keyboardVerticalPadding * 2
-            + KeyboardTheme.diagnosticsBarHeight
+        KeyboardMetrics.preferredKeyboardHeight(
+            rowCount: model.rows.count,
+            width: UIScreen.main.bounds.width,
+            stripHeight: KeyboardTheme.diagnosticsBarHeight
+        )
     }
 
     /// The extension itself must stay transparent for iOS 26's glass container, so the

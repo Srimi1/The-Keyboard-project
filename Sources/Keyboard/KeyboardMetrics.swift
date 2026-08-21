@@ -49,8 +49,30 @@ enum KeyboardMetrics {
         guard rowCount > 0 else { return 0 }
         let spacing = CGFloat(rowCount - 1) * KeyboardTheme.rowSpacing
         let available = size.height - spacing - KeyboardTheme.keyboardVerticalPadding * 2
-        guard available > 0 else { return KeyboardTheme.keyRowHeight }
+        guard available > 0 else { return preferredRowHeight(forWidth: size.width) }
         return available / CGFloat(rowCount)
+    }
+
+    /// Row height derived from key width rather than hardcoded per device.
+    ///
+    /// A letter key is 10% of the keyboard's width, so tying height to that keeps keys the
+    /// same shape on every iPhone — which is what actually transfers muscle memory, and it
+    /// adapts to device classes without a table of magic numbers. The ratio itself is a
+    /// 📐 MEASURE item (UI-SPEC.md V-02/V-11): measure a real Gboard key's width-to-height
+    /// ratio and replace it. Clamped so unusual widths cannot produce a comical keyboard.
+    static func preferredRowHeight(forWidth width: CGFloat) -> CGFloat {
+        let letterKeyWidth = width * 0.10
+        let ratio: CGFloat = 1.35
+        return min(max(letterKeyWidth * ratio, 44), 62)
+    }
+
+    /// Total height to request from the system, including the status/suggestion strip.
+    static func preferredKeyboardHeight(rowCount: Int, width: CGFloat, stripHeight: CGFloat) -> CGFloat {
+        let rowHeight = preferredRowHeight(forWidth: width)
+        return CGFloat(rowCount) * rowHeight
+            + CGFloat(max(rowCount - 1, 0)) * KeyboardTheme.rowSpacing
+            + KeyboardTheme.keyboardVerticalPadding * 2
+            + stripHeight
     }
 
     /// The key under a touch point.
