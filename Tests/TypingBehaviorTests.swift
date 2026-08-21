@@ -243,43 +243,67 @@ final class MoreKeysTests: XCTestCase {
     private func key(_ character: String) -> Key { .letter(character) }
 
     /// The corner hint glyph advertises the digit, so it has to be the first thing under the
-    /// finger when the key is held.
+    /// finger. AOSP prepends it via additionalMoreKeys.
     func testTopRowLeadsWithItsDigit() {
         XCTAssertEqual(MoreKeys.options(for: key("q"), shift: .off)?.first, "1")
         XCTAssertEqual(MoreKeys.options(for: key("p"), shift: .off)?.first, "0")
         XCTAssertEqual(MoreKeys.options(for: key("e"), shift: .off)?.first, "3")
     }
 
-    func testTopRowKeysAlsoOfferTheirAccents() {
-        let options = MoreKeys.options(for: key("e"), shift: .off) ?? []
-        XCTAssertEqual(options.first, "3")
-        XCTAssertTrue(options.contains("é"))
+    /// Order is ground truth: it decides which accent the finger lands on.
+    func testAccentSetsMatchAOSPExactly() {
+        XCTAssertEqual(MoreKeys.options(for: key("e"), shift: .off), ["3", "é", "è", "ê", "ë", "ē"])
+        XCTAssertEqual(MoreKeys.options(for: key("u"), shift: .off), ["7", "ú", "û", "ü", "ù", "ū"])
+        XCTAssertEqual(MoreKeys.options(for: key("i"), shift: .off), ["8", "í", "î", "ï", "ī", "ì"])
+        XCTAssertEqual(MoreKeys.options(for: key("o"), shift: .off), ["9", "ó", "ô", "ö", "ò", "œ", "ø", "ō", "õ"])
+        XCTAssertEqual(MoreKeys.options(for: key("a"), shift: .off), ["à", "á", "â", "ä", "æ", "ã", "å", "ā"])
+        XCTAssertEqual(MoreKeys.options(for: key("s"), shift: .off), ["ß"])
+        XCTAssertEqual(MoreKeys.options(for: key("c"), shift: .off), ["ç"])
+        XCTAssertEqual(MoreKeys.options(for: key("n"), shift: .off), ["ñ"])
     }
 
-    func testHomeRowAccentsHaveNoDigit() {
-        let options = MoreKeys.options(for: key("a"), shift: .off) ?? []
-        XCTAssertEqual(options.first, "à")
-        XCTAssertFalse(options.contains { $0.first?.isNumber == true })
+    /// English overrides exactly eight letters. A plausible-looking guess gives y, d, g, l and
+    /// z accents they do not have in AOSP — this guards against drifting back to that.
+    func testLettersAOSPGivesNoAccentsHaveNone() {
+        for letter in ["d", "f", "g", "h", "j", "k", "l", "z", "x", "v", "b", "m"] {
+            XCTAssertNil(MoreKeys.options(for: key(letter), shift: .off), "\(letter) should have no more-keys in en_US")
+        }
+        // y is on the top row, so it has its digit and nothing else.
+        XCTAssertEqual(MoreKeys.options(for: key("y"), shift: .off), ["6"])
     }
 
-    /// Holding a shifted letter must offer capital accents, or shift silently stops applying.
     func testShiftUppercasesAccents() {
         let options = MoreKeys.options(for: key("A"), shift: .shifted) ?? []
         XCTAssertTrue(options.contains("À"))
         XCTAssertFalse(options.contains("à"))
     }
 
-    func testLettersWithoutAccentsOrDigitsHaveNoOptions() {
-        XCTAssertNil(MoreKeys.options(for: key("x"), shift: .off))
-        XCTAssertNil(MoreKeys.options(for: key("v"), shift: .off))
+    /// ß upper-cases to the two-character "SS", which AOSP models as an output-text key.
+    func testShiftedEszettBecomesTwoCharacters() {
+        XCTAssertEqual(MoreKeys.options(for: key("S"), shift: .shifted), ["SS"])
     }
 
-    func testPeriodOffersThePunctuationGrid() {
+    /// morekeys_punctuation, in resource order. It leads with the comma, which none of the
+    /// press coverage mentions.
+    func testPeriodGridMatchesAOSPOrder() {
+        XCTAssertEqual(
+            MoreKeys.options(for: key("."), shift: .off),
+            [",", "?", "!", "#", ")", "(", "/", ";", "'", "@", ":", "-", "\"", "+", "%", "&"]
+        )
+    }
+
+    /// !autoColumnOrder!8 — 16 entries wrap to 8 columns across two rows.
+    func testPeriodGridWrapsToEightColumns() {
         let options = MoreKeys.options(for: key("."), shift: .off) ?? []
-        XCTAssertGreaterThan(options.count, 8)
-        for expected in ["&", "%", "+", "#", "!", "@"] {
-            XCTAssertTrue(options.contains(expected), "punctuation grid is missing \(expected)")
-        }
+        XCTAssertEqual(MoreKeys.columns(for: key("."), options: options), 8)
+    }
+
+    /// The 8-column rule belongs to the punctuation set alone. Applying it generally wrapped
+    /// o's nine options across two rows for no reason.
+    func testLetterCalloutsStayOneRow() {
+        let options = MoreKeys.options(for: key("o"), shift: .off) ?? []
+        XCTAssertEqual(options.count, 9)
+        XCTAssertEqual(MoreKeys.columns(for: key("o"), options: options), 9)
     }
 
     func testFunctionKeysHaveNoOptions() {

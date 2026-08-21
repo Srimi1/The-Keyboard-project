@@ -80,17 +80,17 @@ Long-press is where muscle memory lives, and where iOS keyboards feel most wrong
 
 ### 5a. Letter keys → accent callouts
 
-Hold a letter, a horizontal callout row appears, slide to choose, release to insert. Working set for English (US) — **📐 MEASURE against a real device before shipping; accent sets vary by Gboard version:**
+Hold a letter, a horizontal callout row appears, slide to choose, release to insert. **Sourced from AOSP LatinIME**, not a guess: `tools/make-keyboard-text/res/values-en/donottranslate-more-keys.xml` (fetched 2026-08-21, `master` branch) — the English-locale override of the code-generation tool's `donottranslate-more-keys.xml`, whose `values/` base defines every `morekeys_*` string empty. English overrides exactly **eight** letters; everything else has none, notably `y`, `d`, `g`, `l`, `z` — a plausible-looking guess would have given those ÿ, ď, ğ, ł, ž, and been wrong.
 
 | Key | Alternates | | Key | Alternates |
 |---|---|---|---|---|
-| `e` | é è ê ë ē ė ę | | `a` | à á â ä æ ã å ā ą |
-| `y` | ÿ ý | | `s` | ś š ß ş |
-| `u` | ú ù û ü ū | | `d` | ð ď |
-| `i` | í ì î ï ī į | | `g` | ğ |
-| `o` | ó ò ô ö õ ō ø œ | | `l` | ł |
-| `n` | ñ ń | | `z` | ž ź ż |
-| `c` | ç ć č | | *others* | no alternates |
+| `a` | à á â ä æ ã å ā | | `s` | ß |
+| `e` | é è ê ë ē | | `c` | ç |
+| `i` | í î ï ī ì | | `n` | ñ |
+| `o` | ó ô ö ò œ ø ō õ | | *others* | no alternates |
+| `u` | ú û ü ù ū | | | |
+
+This is AOSP LatinIME's table, the best available open-source proxy — Gboard itself is closed-source and may differ. V-05 in §12 still covers confirming it against a real device.
 
 ### 5b. Top row → digit hints (Gboard's "Long press for symbols")
 
@@ -104,7 +104,11 @@ This is a v1 requirement — it's how Gboard users type numbers without a number
 
 ### 5c. Punctuation keys
 
-- **Period `.`** → a **grid popup** of ~14 punctuation symbols. Known members from press coverage: `& % + # ! @ ? ( )` and more; some grid cells show an ellipsis and holding them reveals further nested characters; **sliding left from the held period reaches `/`**. 📐 **MEASURE the exact contents and 2-D ordering** — press coverage only lists a subset, and getting the order wrong defeats the entire point of muscle-memory fidelity.
+- **Period `.`** → an **8-column, 2-row grid** of 16 symbols (`morekeys_punctuation`, `!autoColumnOrder!8` — fixed column count, automatic placement). **Sourced from AOSP** (same file as §5a). AOSP fills the row nearest the touch point first, so the resource order lays out bottom-row-then-top-row, left to right:
+  - Bottom row (closest to the held key): `, ? ! # ) ( / ;`
+  - Top row: `' @ : - " + % &`
+
+  This supersedes the earlier press-coverage guess (`& % + # ! @ ? ( )`), which had both the wrong membership and no ordering. 📐 Cell size, spacing, and corner radius still need a device screenshot — V-06 in §12 now covers styling only.
 - **Comma `,`** → a **mini-popup**: drag to a **settings gear** (opens our host app's settings) and a one-handed icon (one-handed mode is deferred — v1 shows the gear only, or greys the second slot; 📐 MEASURE which reads better against the reference).
   `Source:` Google's own help text — "touch and hold the comma, then drag your finger to Settings."
 - **Spacebar** → language switch on Android. English-only in v1 (ADR-002), so v1 shows nothing or a no-op. 📐 Decide at M2; do not invent a different function for this gesture — a wrong action is worse than no action.
@@ -208,8 +212,8 @@ Capture these from a real Android device at **M0** — reference screenshots are
 | V-02 | Exact key heights, gaps, corner radii (measured in pixels, with device DPI noted) | M1 |
 | V-03 | `?123` and `=\<` layers, complete | M1 |
 | V-04 | Key-preview popup mid-press (size, offset, radius) | M1 |
-| V-05 | Accent callout row open on `e`, `a`, `o` (confirms §5a sets and callout styling) | M2 |
-| V-06 | **Period long-press grid — full contents and ordering** | M2 |
+| V-05 | Accent callout row open on `e`, `a`, `o` — **sets sourced from AOSP (2026-08-21); this now confirms callout styling only** | M2 |
+| V-06 | Period long-press grid — **contents and ordering sourced from AOSP (2026-08-21); this now confirms cell size/spacing/corner radius only** | M2 |
 | V-07 | Comma long-press mini-popup | M2 |
 | V-08 | Top-row digit hint glyphs (size, position, opacity) | M1 |
 | V-09 | Suggestion strip mid-typing (3 candidates, emphasis) and idle toolbar | M4 |
