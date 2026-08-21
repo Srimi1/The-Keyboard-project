@@ -60,6 +60,9 @@ Each of these is a mistake that looks correct while writing it:
 
 - ❌ **Never assume Full Access is on.** Gate on `hasFullAccess` at runtime. Without it: no pasteboard, no network, no haptics, no sound, no reliable App Group writes — and the haptic/sound APIs **silently no-op rather than error** (C-05, C-07).
 - ❌ **Never write App Group data from the extension without checking access.** Writes fail unreliably without Full Access; settings mirror to local defaults with timestamp conflict resolution (C-12).
+- ❌ **Never test App Group availability with `UserDefaults(suiteName:)`.** It returns a non-nil instance for a group you are not entitled to, and an in-process write/read-back succeeds off the cache — reporting a pass on a completely unprovisioned group. Use `containerURL(...) == nil` for the entitlement, and a cross-process token for sharing (C-35).
+- ❌ **Never conclude "the pasteboard is empty" from a `nil` read.** Deny returns nil fast and looks identical to empty; check the prompt-free `hasStrings` first (C-37). And never read pasteboard values on the main thread outside a user-initiated diagnostic — the read blocks while the alert is up and freezes the keyboard (C-38).
+- ❌ **Never read `hasFullAccess` (or `needsInputModeSwitchKey`) in `viewDidLoad`** — the host connection may not exist yet and the result is inaccurate. Read in `viewWillAppear`, every appearance (C-41).
 - ❌ **Never read UIPasteboard values outside the capture pipeline.** Every value read can fire the system "Allow Paste" alert (C-14). `changeCount` / `hasStrings` / `detectPatterns` are prompt-free — use those to detect (C-16).
 - ❌ **Never add network code to the extension.** Not sync, not analytics, not crash reporting (ADR-005). Full Access unlocks network; we never use it.
 - ❌ **Never paint an opaque keyboard background.** iOS 26 wraps keyboards in a system glass container; opaque backgrounds render as a gray bar (CONSTRAINTS §8 gotcha ledger).

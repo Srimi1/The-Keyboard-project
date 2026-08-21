@@ -63,7 +63,15 @@ targets:
         PRODUCT_NAME: KeyboardExtension
         INFOPLIST_FILE: Sources/Keyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/Keyboard/Keyboard.entitlements
+        # XcodeGen does not set this for app-extension targets; without it,
+        # `xcodebuild archive` leaves a stray .appex at the archive root.
         SKIP_INSTALL: YES
+        # Defaults to YES for app extensions in Xcode 16+/26 and is a known source of
+        # missing .debug.dylib load failures and invalid-code-signature errors. Those
+        # present as "the keyboard doesn't work" with nothing useful to debug, which is
+        # this project's characteristic failure mode. We don't use SwiftUI Previews in
+        # the extension, so the feature it buys is worth nothing here.
+        ENABLE_DEBUG_DYLIB: NO
 
 schemes:
   KeyboardProject:
