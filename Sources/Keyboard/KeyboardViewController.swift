@@ -144,12 +144,20 @@ final class KeyboardViewController: UIInputViewController {
 
 // MARK: - Audio feedback
 
-/// `UIDevice.playInputClick()` does nothing unless something in the input view hierarchy
-/// adopts this and returns true.
+/// `UIDevice.playInputClick()` plays nothing unless the **on-screen input view** adopts this
+/// and returns true.
 ///
-/// ⚠️ Apple documents the conformance on the *input view*; adopting it on the view controller
-/// is the widely-used form and is what this does. Whether clicks then actually sound — and
-/// whether they need Full Access at all — is **Q-03, unverified**. Confirm on device.
+/// The object iOS consults is the system-vended `UIInputView` (`self.inputView`), not the view
+/// controller — Apple's docs are explicit that the conformance belongs on the `UIView`
+/// subclass. Adopting it only on the controller is a silent no-op that looks exactly like
+/// "Full Access is off", which is how it could hide behind Q-03 indefinitely.
+///
+/// `@retroactive` is required because both the class and the protocol come from UIKit.
+extension UIInputView: @retroactive UIInputViewAudioFeedback {
+    public var enableInputClicksWhenVisible: Bool { true }
+}
+
+/// Kept as well — it costs nothing, and the controller conformance is the widely-used form.
 extension KeyboardViewController: UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
 }

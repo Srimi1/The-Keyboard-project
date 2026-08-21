@@ -85,7 +85,7 @@ side-by-side comparison below can be done without switching keyboards
 - ✅ Double-space → period on the sourced 1100 ms window; immediate backspace restores the two spaces.
 - ✅ Spacebar slide cursor control via `adjustTextPosition` (§6). Step distance is still 📐 MEASURE.
 - ✅ Haptics + key click, gated on `hasFullAccess` with silent degradation (C-07, C-08). Click audibility is **Q-03, unverified**.
-- ⬜ Replace the working accent sets and punctuation grid with AOSP's `donottranslate-more-keys.xml` — order matters as much as contents.
+- ✅ Replaced the working accent sets and punctuation grid with AOSP's sourced `donottranslate-more-keys.xml` values (2026-08-21) — contents and order verified against the primary source exactly; see [UI-SPEC.md](UI-SPEC.md) §5a/§5c.
 - ⬜ Resolve the remaining 📐 MEASURE items from reference screenshots — especially **V-06, the period grid's contents and ordering**.
 - ⬜ Side-by-side screenshot comparison; fix every visible delta.
 

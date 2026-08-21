@@ -44,7 +44,11 @@ final class KeyboardViewModel: ObservableObject {
         /// The held key's visual rect, so the callout can anchor above it.
         let anchor: CGRect
         let options: [String]
+        /// Columns before wrapping. The punctuation grid is 8 wide; letter callouts are one row.
+        let columns: Int
         var selectedIndex: Int
+
+        var rows: Int { Int(ceil(Double(options.count) / Double(max(columns, 1)))) }
     }
 
     let feedback = FeedbackService()
@@ -172,6 +176,7 @@ final class KeyboardViewModel: ObservableObject {
                 keyID: positioned.id,
                 anchor: positioned.rect,
                 options: options,
+                columns: MoreKeys.columns(for: positioned.key, options: options),
                 selectedIndex: 0
             )
             self.suppressKeyOnRelease(touchID)
@@ -183,29 +188,46 @@ final class KeyboardViewModel: ObservableObject {
         activeTouches[index].suppressesKeyOnRelease = true
     }
 
-    /// Maps the finger's horizontal position across the callout to a selected option.
+    /// Maps the finger's position across the callout grid to a selected option.
     private func updateCalloutSelection(at point: CGPoint) {
         guard var callout else { return }
-        let width = calloutOptionWidth(for: callout)
-        let origin = calloutOrigin(for: callout, optionWidth: width)
-        let index = Int((point.x - origin) / width)
-        let clamped = min(max(index, 0), callout.options.count - 1)
-        guard clamped != callout.selectedIndex else { return }
+        guard let index = calloutIndex(at: point, in: callout) else { return }
+        guard index != callout.selectedIndex else { return }
 
-        callout.selectedIndex = clamped
+        callout.selectedIndex = index
         self.callout = callout
         feedback.selectionChanged()
     }
 
-    /// Kept here rather than in the view so selection and drawing agree — the same reason
-    /// hit-testing and rendering share ``KeyboardMetrics``.
-    func calloutOptionWidth(for callout: CalloutState) -> CGFloat {
-        max(callout.anchor.width, 34)
+    // Callout geometry lives here rather than in the view so selection and drawing agree —
+    // the same reason hit-testing and rendering share ``KeyboardMetrics``.
+
+    func calloutOptionSize(for callout: CalloutState) -> CGSize {
+        CGSize(width: max(callout.anchor.width, 34), height: callout.anchor.height)
     }
 
-    func calloutOrigin(for callout: CalloutState, optionWidth: CGFloat) -> CGFloat {
-        let total = optionWidth * CGFloat(callout.options.count)
-        return callout.anchor.midX - total / 2
+    /// Top-left of the callout grid.
+    func calloutOrigin(for callout: CalloutState) -> CGPoint {
+        let option = calloutOptionSize(for: callout)
+        let width = option.width * CGFloat(min(callout.columns, callout.options.count))
+        let height = option.height * CGFloat(callout.rows)
+        // A keyboard cannot draw above its own top edge, so a callout on the top row sits
+        // just below it rather than floating outside (C-45).
+        let y = max(0, callout.anchor.minY - height - 2)
+        return CGPoint(x: callout.anchor.midX - width / 2, y: y)
+    }
+
+    /// AOSP fills the row nearest the finger first, so resource item 0 is bottom-left.
+    func calloutIndex(at point: CGPoint, in callout: CalloutState) -> Int? {
+        let option = calloutOptionSize(for: callout)
+        let origin = calloutOrigin(for: callout)
+
+        let column = min(max(Int((point.x - origin.x) / option.width), 0), callout.columns - 1)
+        let rowFromTop = min(max(Int((point.y - origin.y) / option.height), 0), callout.rows - 1)
+        let rowFromBottom = callout.rows - 1 - rowFromTop
+
+        let index = rowFromBottom * callout.columns + column
+        return index < callout.options.count ? index : nil
     }
 
     private func move(_ touch: KeyboardTouch, positionedKeys: [PositionedKey]) {

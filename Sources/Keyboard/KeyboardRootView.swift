@@ -220,28 +220,39 @@ private struct KeyFace: View {
 
 /// The accent / punctuation options shown while a key is held (UI-SPEC §5).
 ///
-/// Positioned from the same numbers the model uses to decide which option the finger is over,
-/// so what is highlighted is always what will be inserted.
+/// Laid out from the same numbers the model uses to decide which option the finger is over,
+/// so what is highlighted is always what will be inserted. AOSP fills the row nearest the
+/// finger first, so resource item 0 sits bottom-left and the grid grows upward.
 private struct CalloutBar: View {
     let callout: KeyboardViewModel.CalloutState
     let model: KeyboardViewModel
     let theme: KeyboardTheme
 
     var body: some View {
-        let optionWidth = model.calloutOptionWidth(for: callout)
-        let originX = model.calloutOrigin(for: callout, optionWidth: optionWidth)
-        let height = callout.anchor.height
+        let option = model.calloutOptionSize(for: callout)
+        let origin = model.calloutOrigin(for: callout)
+        let columns = min(callout.columns, callout.options.count)
 
-        HStack(spacing: 0) {
-            ForEach(Array(callout.options.enumerated()), id: \.offset) { index, option in
-                Text(option)
-                    .font(.system(size: 20))
-                    .foregroundStyle(index == callout.selectedIndex ? Color.white : theme.keyLabel)
-                    .frame(width: optionWidth, height: height)
-                    .background(
-                        index == callout.selectedIndex ? theme.accent : Color.clear,
-                        in: RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                    )
+        VStack(spacing: 0) {
+            ForEach(0..<callout.rows, id: \.self) { rowFromTop in
+                let rowFromBottom = callout.rows - 1 - rowFromTop
+                HStack(spacing: 0) {
+                    ForEach(0..<columns, id: \.self) { column in
+                        let index = rowFromBottom * callout.columns + column
+                        if index < callout.options.count {
+                            Text(callout.options[index])
+                                .font(.system(size: 19))
+                                .foregroundStyle(index == callout.selectedIndex ? Color.white : theme.keyLabel)
+                                .frame(width: option.width, height: option.height)
+                                .background(
+                                    index == callout.selectedIndex ? theme.accent : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                                )
+                        } else {
+                            Color.clear.frame(width: option.width, height: option.height)
+                        }
+                    }
+                }
             }
         }
         .background(
@@ -250,10 +261,8 @@ private struct CalloutBar: View {
                 .shadow(radius: 2, y: 1)
         )
         .position(
-            x: originX + optionWidth * CGFloat(callout.options.count) / 2,
-            // A keyboard cannot draw above its own top edge, so a callout on the top row sits
-            // just below it rather than floating outside (C-45).
-            y: max(height * 0.6, callout.anchor.minY - height * 0.65)
+            x: origin.x + option.width * CGFloat(columns) / 2,
+            y: origin.y + option.height * CGFloat(callout.rows) / 2
         )
     }
 }
