@@ -96,6 +96,7 @@ struct KeyboardPreviewView: View {
 final class PreviewActionHandler: ObservableObject, KeyboardActionHandler {
 
     @Published var text: String = ""
+    @Published var cursorOffset: Int = 0
 
     func insert(_ text: String) {
         self.text.append(text)
@@ -104,6 +105,11 @@ final class PreviewActionHandler: ObservableObject, KeyboardActionHandler {
     func deleteBackward() {
         guard !text.isEmpty else { return }
         text.removeLast()
+    }
+
+    /// The preview has no real caret, so a slide is recorded rather than applied.
+    func adjustTextPosition(by offset: Int) {
+        cursorOffset += offset
     }
 
     func configureNextKeyboardButton(_ button: UIButton) {
