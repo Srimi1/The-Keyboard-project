@@ -23,6 +23,17 @@ All facts below recorded **2026-08-21** from the research corpus in [`reference/
 - **C-04** — Data sharing between host app and extension uses **App Groups** (`UserDefaults(suiteName:)` / shared container). See §4 for the Full Access write caveat.
   `Source:` Apple archive guide (C-01) · `Confidence:` high · `Verified:` no
 
+### Project configuration (verified on this machine)
+
+- **C-31** — XcodeGen target type `app-extension` plus a host-app dependency with `embed: true` produces correct embedding: the built `.appex` lands in `KeyboardProject.app/PlugIns/`. Confirmed by inspecting the built bundle.
+  `Source:` local build, Xcode 26.6 / XcodeGen 2.45.4 · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` **yes** (macOS build; not yet a device install)
+- **C-32** — `NSExtensionPrincipalClass` written as `$(PRODUCT_MODULE_NAME).KeyboardViewController` resolves at build time to the module-qualified name (here `KeyboardExtension.KeyboardViewController`). Confirmed in the built Info.plist. A Swift principal class **must** be module-qualified; a bare class name does not resolve.
+  `Source:` local build · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` **yes**
+- **C-33** — For **simulator** builds, entitlements are carried in the binary's `__entitlements` section rather than a code signature, so `codesign -d --entitlements -` prints an empty dict even when they applied. With ad-hoc signing (`CODE_SIGN_IDENTITY="-"`) the App Group container *is* reachable in the simulator and a write round-trips. ⚠️ **This is not evidence for Q-01** — the simulator has no provisioning profile, so it exercises the code, not the developer account. Only a real-device run on the free personal team closes Q-01.
+  `Source:` local build + run, iOS 26.5 simulator · `Recorded:` 2026-08-21 · `Confidence:` high · `Verified:` **yes**
+- **C-34** — A `TextField` in the **host app** focused while a custom keyboard is active is unremarkable; the documented iOS 17.0–17.1 crash (§8) applies to a text field **inside the keyboard extension**, which this project does not use.
+  `Source:` §8 ledger, scoped by reading · `Recorded:` 2026-08-21 · `Confidence:` medium · `Verified:` no
+
 ## 2. Full Access matrix
 
 - **C-05** — Without `RequestsOpenAccess` / Full Access, a keyboard has: **no network, no UIPasteboard, no Location/Contacts, no reliable shared-container access, no audio playback**. Apple's guide lists all of these as open-access-gated.
