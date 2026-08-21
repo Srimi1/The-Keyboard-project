@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// What the keyboard can do to the text field. Implemented by the view controller so the
 /// SwiftUI layer never touches `textDocumentProxy` directly.
@@ -6,7 +7,10 @@ import SwiftUI
 protocol KeyboardActionHandler: AnyObject {
     func insert(_ text: String)
     func deleteBackward()
-    func advanceToNextKeyboard()
+    /// Wires a real UIButton to `handleInputModeList(from:with:)`. A SwiftUI Button calling
+    /// `advanceToNextInputMode()` handles only tap and silently loses the long-press keyboard
+    /// picker, so the globe key has to be a UIKit button (C-21).
+    func configureNextKeyboardButton(_ button: UIButton)
     var hasFullAccess: Bool { get }
 }
 
@@ -53,7 +57,7 @@ final class KeyboardViewModel: ObservableObject {
             layer = target
 
         case .nextKeyboard:
-            handler.advanceToNextKeyboard()
+            break   // handled by NextKeyboardButton, which needs UIKit target-action
 
         case .diagnostics:
             showDiagnostics.toggle()
@@ -144,8 +148,16 @@ private struct KeyGrid: View {
                             Spacer().frame(width: width * row.leadingInset)
                         }
                         ForEach(row.keys) { key in
-                            KeyButton(key: key, theme: theme) {
-                                model.handle(key.action)
+                            Group {
+                                if key.action == .nextKeyboard {
+                                    NextKeyboardButton(theme: theme) { button in
+                                        model.handler?.configureNextKeyboardButton(button)
+                                    }
+                                } else {
+                                    KeyButton(key: key, theme: theme) {
+                                        model.handle(key.action)
+                                    }
+                                }
                             }
                             .frame(width: keyWidth(for: key, totalWidth: width, row: row))
                         }
@@ -168,6 +180,31 @@ private struct KeyGrid: View {
         let usableWidth = totalWidth - totalGap - (totalWidth * row.leadingInset * 2)
         let fractionSum = row.keys.reduce(0) { $0 + $1.widthFraction }
         return usableWidth * (key.widthFraction / fractionSum)
+    }
+}
+
+/// The globe key, as a real UIKit button.
+///
+/// It must respond to `.allTouchEvents` rather than a tap so that touch-and-hold opens the
+/// system keyboard picker; a SwiftUI Button cannot express that (C-21).
+private struct NextKeyboardButton: UIViewRepresentable {
+    let theme: KeyboardTheme
+    let configure: (UIButton) -> Void
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "globe"), for: .normal)
+        button.tintColor = UIColor(theme.keyLabel)
+        button.backgroundColor = UIColor(theme.functionKeyFill)
+        button.layer.cornerRadius = KeyboardTheme.keyCornerRadius
+        button.layer.cornerCurve = .continuous
+        configure(button)
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        button.tintColor = UIColor(theme.keyLabel)
+        button.backgroundColor = UIColor(theme.functionKeyFill)
     }
 }
 

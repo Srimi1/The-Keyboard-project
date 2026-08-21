@@ -27,8 +27,11 @@ final class DiagnosticsRunner: ObservableObject {
     func startMemoryMonitor() {
         refreshMemory()
         memoryTimer?.invalidate()
+        // `guard let` first: capturing the weak `var self` directly inside the Task is a
+        // concurrency error in Swift 6 mode. The timer holds self weakly, so no cycle.
         memoryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshMemory() }
+            guard let self else { return }
+            Task { @MainActor in self.refreshMemory() }
         }
     }
 
