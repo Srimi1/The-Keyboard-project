@@ -61,6 +61,7 @@ targets:
         PRODUCT_NAME: KeyboardProject
         INFOPLIST_FILE: Sources/HostApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/HostApp/HostApp.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Must be restated per target: XcodeGen's iOS platform preset sets
         # TARGETED_DEVICE_FAMILY "1,2" at TARGET level, which beats anything in the
         # project-level base — set it only above and you silently ship a universal app.
