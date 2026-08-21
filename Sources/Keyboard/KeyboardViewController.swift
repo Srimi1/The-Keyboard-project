@@ -149,34 +149,6 @@ extension KeyboardViewController: KeyboardActionHandler {
         textDocumentProxy.deleteBackward()
     }
 
-    /// Deletes back to the start of the preceding word, which is where held backspace
-    /// accelerates to. Falls back to a single character when there is no word boundary to
-    /// find — `documentContextBeforeInput` only reaches back a sentence or so (C-18).
-    func deleteWordBackward() {
-        guard let context = textDocumentProxy.documentContextBeforeInput, !context.isEmpty else {
-            textDocumentProxy.deleteBackward()
-            return
-        }
-
-        // Trailing whitespace goes first, then the word itself — deleting a word from
-        // "hello world " should leave "hello ", not "hello world".
-        var remaining = Substring(context)
-        var deletions = 0
-
-        while let last = remaining.last, last.isWhitespace, !last.isNewline {
-            remaining = remaining.dropLast()
-            deletions += 1
-        }
-        while let last = remaining.last, !last.isWhitespace {
-            remaining = remaining.dropLast()
-            deletions += 1
-        }
-
-        for _ in 0..<max(deletions, 1) {
-            textDocumentProxy.deleteBackward()
-        }
-    }
-
     /// `.allTouchEvents` rather than `.touchUpInside`: `handleInputModeList(from:with:)`
     /// needs the full event stream to distinguish a tap (advance) from a touch-and-hold
     /// (show the keyboard picker).
