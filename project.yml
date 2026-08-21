@@ -28,7 +28,6 @@ settings:
     # project. Setting it at project level keeps both targets consistent.
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
-    TARGETED_DEVICE_FAMILY: "1"          # iPhone only
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
@@ -46,12 +45,31 @@ targets:
     sources:
       - path: Sources/Shared
       - path: Sources/HostApp
+      # The keyboard's views compile into the app too, so the host app can render the real
+      # keyboard for side-by-side comparison against Gboard reference screenshots (M1/M2
+      # exit criteria) without switching keyboards. The extension's own controller and
+      # bundle files are excluded — XcodeGen only auto-excludes a target's OWN
+      # INFOPLIST_FILE, so leaving these in would add them to Copy Bundle Resources.
+      - path: Sources/Keyboard
+        excludes:
+          - "KeyboardViewController.swift"
+          - "Info.plist"
+          - "Keyboard.entitlements"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject
         PRODUCT_NAME: KeyboardProject
         INFOPLIST_FILE: Sources/HostApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/HostApp/HostApp.entitlements
+        # Must be restated per target: XcodeGen's iOS platform preset sets
+        # TARGETED_DEVICE_FAMILY "1,2" at TARGET level, which beats anything in the
+        # project-level base — set it only above and you silently ship a universal app.
+        TARGETED_DEVICE_FAMILY: "1"
+        # Same reason: the iOS application preset injects the legacy identity
+        # "iPhone Developer" at target level, which no longer matches modern
+        # certificates and fails signing on device.
+        CODE_SIGN_IDENTITY: "-"
+        "CODE_SIGN_IDENTITY[sdk=iphoneos*]": "Apple Development"
     dependencies:
       - target: KeyboardExtension
         embed: true
@@ -72,6 +90,9 @@ targets:
         PRODUCT_NAME: KeyboardExtension
         INFOPLIST_FILE: Sources/Keyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/Keyboard/Keyboard.entitlements
+        # See the host app — platform presets land at target level.
+        TARGETED_DEVICE_FAMILY: "1"
+        "CODE_SIGN_IDENTITY[sdk=iphoneos*]": "Apple Development"
         # XcodeGen does not set this for app-extension targets; without it,
         # `xcodebuild archive` leaves a stray .appex at the archive root.
         SKIP_INSTALL: YES
@@ -82,13 +103,36 @@ targets:
         # the extension, so the feature it buys is worth nothing here.
         ENABLE_DEBUG_DYLIB: NO
 
+  # ------------------------------------------------------------------- tests
+  # Covers the typing rules and the layout maths — the parts whose failure mode is a
+  # keyboard that feels subtly wrong rather than one that visibly breaks, and the only
+  # part of M1 verifiable without hardware.
+  KeyboardProjectTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject.tests
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+    dependencies:
+      - target: KeyboardProject
+
 schemes:
   KeyboardProject:
     build:
       targets:
         KeyboardProject: all
         KeyboardExtension: all
+        KeyboardProjectTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - KeyboardProjectTests
     archive:
       config: Release

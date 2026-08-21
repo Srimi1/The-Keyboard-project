@@ -1,73 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// What the keyboard can do to the text field. Implemented by the view controller so the
-/// SwiftUI layer never touches `textDocumentProxy` directly.
-@MainActor
-protocol KeyboardActionHandler: AnyObject {
-    func insert(_ text: String)
-    func deleteBackward()
-    /// Wires a real UIButton to `handleInputModeList(from:with:)`. A SwiftUI Button calling
-    /// `advanceToNextInputMode()` handles only tap and silently loses the long-press keyboard
-    /// picker, so the globe key has to be a UIKit button (C-21).
-    func configureNextKeyboardButton(_ button: UIButton)
-    var hasFullAccess: Bool { get }
-}
-
-@MainActor
-final class KeyboardViewModel: ObservableObject {
-    @Published var layer: KeyboardLayer = .base
-    @Published var shift: ShiftState = .shifted   // sentence start (auto-capitalization is M1)
-    @Published var showDiagnostics = false
-    @Published var needsGlobe: Bool = false
-
-    let diagnostics = DiagnosticsRunner()
-    weak var handler: KeyboardActionHandler?
-
-    var rows: [KeyRow] {
-        KeyboardLayout.rows(layer: layer, shift: shift, needsGlobe: needsGlobe)
-    }
-
-    func handle(_ action: KeyAction) {
-        guard let handler else { return }
-
-        switch action {
-        case .character(let text):
-            handler.insert(text)
-            if shift == .shifted { shift = .off }
-
-        case .space:
-            handler.insert(" ")
-            if shift == .shifted { shift = .off }
-
-        case .newline:
-            handler.insert("\n")
-
-        case .backspace:
-            handler.deleteBackward()
-
-        case .shift:
-            switch shift {
-            case .off: shift = .shifted
-            case .shifted: shift = .capsLock   // M1 replaces this with the double-tap timing rule
-            case .capsLock: shift = .off
-            }
-
-        case .switchLayer(let target):
-            layer = target
-
-        case .nextKeyboard:
-            break   // handled by NextKeyboardButton, which needs UIKit target-action
-
-        case .diagnostics:
-            showDiagnostics.toggle()
-            if showDiagnostics {
-                diagnostics.runSafeProbes(hasFullAccess: handler.hasFullAccess)
-            }
-        }
-    }
-}
-
 struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
     @Environment(\.colorScheme) private var colorScheme
@@ -92,7 +25,7 @@ struct KeyboardRootView: View {
 
 // MARK: - Status bar
 //
-// M0 only. The real suggestion strip and toolbar arrive at M4 (UI-SPEC.md §7).
+// M0/M1 scaffolding. The real suggestion strip and toolbar arrive at M4 (UI-SPEC.md §7).
 
 private struct StatusBar: View {
     @ObservedObject var model: KeyboardViewModel
@@ -100,7 +33,7 @@ private struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("M0 spike")
+            Text("M1")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.hintGlyph)
 
@@ -111,7 +44,7 @@ private struct StatusBar: View {
                 .foregroundStyle(memoryColor)
 
             Button {
-                model.handle(.diagnostics)
+                model.perform(.diagnostics)
             } label: {
                 Text(model.showDiagnostics ? "Close" : "Diagnostics")
                     .font(.system(size: 11, weight: .semibold))
@@ -132,61 +65,156 @@ private struct StatusBar: View {
     }
 }
 
-// MARK: - Keys
+// MARK: - Key grid
 
+/// Keys are drawn at absolute rects computed by ``KeyboardMetrics``, and the same rects are
+/// used to hit-test touches — so what is drawn and what is touchable cannot drift apart.
+///
+/// Touches come from a UIKit overlay rather than SwiftUI gestures, because rollover (pressing
+/// the next key before releasing the last) needs per-finger tracking that a `DragGesture`
+/// cannot express.
 private struct KeyGrid: View {
     @ObservedObject var model: KeyboardViewModel
     let theme: KeyboardTheme
 
     var body: some View {
         GeometryReader { geometry in
-            let width = geometry.size.width
-            VStack(spacing: KeyboardTheme.rowSpacing) {
-                ForEach(model.rows) { row in
-                    HStack(spacing: KeyboardTheme.keySpacing) {
-                        if row.leadingInset > 0 {
-                            Spacer().frame(width: width * row.leadingInset)
-                        }
-                        ForEach(row.keys) { key in
-                            Group {
-                                if key.action == .nextKeyboard {
-                                    NextKeyboardButton(theme: theme) { button in
-                                        model.handler?.configureNextKeyboardButton(button)
-                                    }
-                                } else {
-                                    KeyButton(key: key, theme: theme) {
-                                        model.handle(key.action)
-                                    }
-                                }
-                            }
-                            .frame(width: keyWidth(for: key, totalWidth: width, row: row))
-                        }
-                        if row.leadingInset > 0 {
-                            Spacer().frame(width: width * row.leadingInset)
-                        }
-                    }
+            let keys = KeyboardMetrics.positionedKeys(rows: model.rows, in: geometry.size)
+
+            ZStack(alignment: .topLeading) {
+                ForEach(keys) { positioned in
+                    keyView(for: positioned)
+                        .frame(width: positioned.rect.width, height: positioned.rect.height)
+                        .position(x: positioned.rect.midX, y: positioned.rect.midY)
+                }
+
+                // Previews sit above every key so a top-row popup is not clipped by its
+                // neighbours. A keyboard cannot draw above its own top edge, so the preview
+                // for row 1 is inset downward rather than floating outside (C-45 territory).
+                ForEach(previewCandidates(in: keys)) { positioned in
+                    KeyPreview(label: positioned.key.label, theme: theme)
+                        .frame(width: positioned.rect.width * 1.35, height: positioned.rect.height * 1.1)
+                        .position(
+                            x: positioned.rect.midX,
+                            y: max(positioned.rect.height * 0.6, positioned.rect.minY - positioned.rect.height * 0.55)
+                        )
+                        .allowsHitTesting(false)
+                }
+
+                TouchTracker { touches in
+                    model.handle(touches: touches, positionedKeys: keys)
                 }
             }
-            .padding(.vertical, KeyboardTheme.keyboardVerticalPadding)
-            .frame(width: width)
         }
     }
 
-    /// Widths are fractions of keyboard width (AOSP LatinIME, UI-SPEC.md §1). Inter-key
-    /// spacing is subtracted proportionally so a row still sums to the full width.
-    private func keyWidth(for key: Key, totalWidth: CGFloat, row: KeyRow) -> CGFloat {
-        let gapCount = CGFloat(row.keys.count - 1)
-        let totalGap = gapCount * KeyboardTheme.keySpacing
-        let usableWidth = totalWidth - totalGap - (totalWidth * row.leadingInset * 2)
-        let fractionSum = row.keys.reduce(0) { $0 + $1.widthFraction }
-        return usableWidth * (key.widthFraction / fractionSum)
+    /// Only character-bearing keys preview. Space, shift, backspace, return and the layer
+    /// keys never do — matching Gboard (UI-SPEC.md §4).
+    private func previewCandidates(in keys: [PositionedKey]) -> [PositionedKey] {
+        keys.filter { positioned in
+            guard model.pressedKeyIDs.contains(positioned.id) else { return false }
+            guard case .character = positioned.key.action else { return false }
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private func keyView(for positioned: PositionedKey) -> some View {
+        if positioned.key.action == .nextKeyboard {
+            NextKeyboardButton(theme: theme) { button in
+                model.handler?.configureNextKeyboardButton(button)
+            }
+        } else {
+            KeyFace(
+                key: positioned.key,
+                theme: theme,
+                isPressed: model.pressedKeyIDs.contains(positioned.id),
+                isActive: isActive(positioned.key)
+            )
+        }
+    }
+
+    /// Caps lock gets a distinct look so the state is visible at a glance.
+    private func isActive(_ key: Key) -> Bool {
+        key.action == .shift && model.shiftState == .capsLock
+    }
+}
+
+// MARK: - Key rendering
+
+private struct KeyFace: View {
+    let key: Key
+    let theme: KeyboardTheme
+    let isPressed: Bool
+    let isActive: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                .fill(fill)
+
+            Text(key.label)
+                .font(labelFont)
+                .foregroundStyle(isActive ? theme.accent : theme.keyLabel)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, 2)
+
+            // Digit hints on the top row. Long-pressing to insert them is M2 (UI-SPEC.md §5b);
+            // M1 renders the glyphs so the layout already reads like Gboard.
+            if let hint = KeyboardLayout.digitHints[key.label.lowercased()], key.style == .letter {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        Spacer()
+                        Text(hint)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(theme.hintGlyph)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 3)
+                .padding(.trailing, 4)
+            }
+        }
+    }
+
+    private var fill: Color {
+        let base = theme.fill(for: key.style)
+        return isPressed ? base.opacity(0.55) : base
+    }
+
+    private var labelFont: Font {
+        switch key.action {
+        case .space:
+            return .system(size: 12, weight: .regular)
+        case .newline, .switchLayer:
+            return .system(size: 14, weight: .medium)
+        default:
+            return .system(size: 20, weight: .regular)
+        }
+    }
+}
+
+/// The enlarged character shown above a pressed key.
+private struct KeyPreview: View {
+    let label: String
+    let theme: KeyboardTheme
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
+                .fill(theme.popupBackground)
+            Text(label)
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(theme.keyLabel)
+        }
     }
 }
 
 /// The globe key, as a real UIKit button.
 ///
 /// It must respond to `.allTouchEvents` rather than a tap so that touch-and-hold opens the
-/// system keyboard picker; a SwiftUI Button cannot express that (C-21).
+/// system keyboard picker; a SwiftUI Button cannot express that (C-47).
 private struct NextKeyboardButton: UIViewRepresentable {
     let theme: KeyboardTheme
     let configure: (UIButton) -> Void
@@ -205,65 +233,5 @@ private struct NextKeyboardButton: UIViewRepresentable {
     func updateUIView(_ button: UIButton, context: Context) {
         button.tintColor = UIColor(theme.keyLabel)
         button.backgroundColor = UIColor(theme.functionKeyFill)
-    }
-}
-
-private struct KeyButton: View {
-    let key: Key
-    let theme: KeyboardTheme
-    let onTap: () -> Void
-
-    @State private var isPressed = false
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                .fill(theme.fill(for: key.style))
-                .opacity(isPressed ? 0.6 : 1)
-
-            Text(key.label)
-                .font(labelFont)
-                .foregroundStyle(theme.keyLabel)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-
-            // Digit hints on the top row. Long-press to insert them is M2 (UI-SPEC.md §5b).
-            if let hint = KeyboardLayout.digitHints[key.label.lowercased()], key.style == .letter {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Text(hint)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(theme.hintGlyph)
-                    }
-                    Spacer()
-                }
-                .padding(.top, 3)
-                .padding(.trailing, 4)
-            }
-        }
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-        // A DragGesture with zero minimum distance gives press-in/release semantics and,
-        // unlike Button, lets M1 add slide-off cancellation (UI-SPEC.md §3).
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
-                .onEnded { _ in
-                    isPressed = false
-                    onTap()
-                }
-        )
-    }
-
-    private var labelFont: Font {
-        switch key.action {
-        case .space:
-            return .system(size: 12, weight: .regular)
-        case .newline, .switchLayer:
-            return .system(size: 14, weight: .medium)
-        default:
-            return .system(size: 20, weight: .regular)
-        }
     }
 }

@@ -77,17 +77,28 @@ struct KeyRow: Identifiable, Equatable {
 
 enum KeyboardLayout {
 
-    /// - Parameter needsGlobe: pass `UIInputViewController.needsInputModeSwitchKey`. It is
-    ///   false on Face ID iPhones, where iOS draws globe and dictation below the keyboard,
-    ///   so the key must not be drawn at all there (C-21).
-    static func rows(layer: KeyboardLayer, shift: ShiftState, needsGlobe: Bool) -> [KeyRow] {
+    /// - Parameters:
+    ///   - needsGlobe: pass `UIInputViewController.needsInputModeSwitchKey`. It is false on
+    ///     Face ID iPhones, where iOS draws globe and dictation below the keyboard, so the key
+    ///     must not be drawn at all there (C-21).
+    ///   - returnLabel: from the field's `returnKeyType` — "go", "search", "send" and so on.
+    static func rows(
+        layer: KeyboardLayer,
+        shift: ShiftState,
+        needsGlobe: Bool,
+        returnLabel: String = "return"
+    ) -> [KeyRow] {
+        let bottom = bottomRow(
+            layerKeyLabel: layer == .base ? "?123" : "ABC",
+            target: layer == .base ? .symbols : .base,
+            needsGlobe: needsGlobe,
+            returnLabel: returnLabel
+        )
+
         switch layer {
-        case .base:
-            return letterRows(shift: shift) + [bottomRow(layerKeyLabel: "?123", target: .symbols, needsGlobe: needsGlobe)]
-        case .symbols:
-            return symbolRows() + [bottomRow(layerKeyLabel: "ABC", target: .base, needsGlobe: needsGlobe)]
-        case .extendedSymbols:
-            return extendedSymbolRows() + [bottomRow(layerKeyLabel: "ABC", target: .base, needsGlobe: needsGlobe)]
+        case .base: return letterRows(shift: shift) + [bottom]
+        case .symbols: return symbolRows() + [bottom]
+        case .extendedSymbols: return extendedSymbolRows() + [bottom]
         }
     }
 
@@ -152,7 +163,12 @@ enum KeyboardLayout {
     //
     // The row iPhone users notice is wrong. Gboard: [?123][,][space][.][return].
 
-    private static func bottomRow(layerKeyLabel: String, target: KeyboardLayer, needsGlobe: Bool) -> KeyRow {
+    private static func bottomRow(
+        layerKeyLabel: String,
+        target: KeyboardLayer,
+        needsGlobe: Bool,
+        returnLabel: String
+    ) -> KeyRow {
         var keys: [Key] = [
             Key(id: "key-layer", label: layerKeyLabel, action: .switchLayer(target), widthFraction: 0.15, style: .function)
         ]
@@ -167,7 +183,7 @@ enum KeyboardLayout {
 
         keys.append(Key(id: "key-space", label: "English (US)", action: .space, widthFraction: 0.50))
         keys.append(Key(id: "key-period", label: ".", action: .character(".")))
-        keys.append(Key(id: "key-return", label: "return", action: .newline, widthFraction: 0.15, style: .function))
+        keys.append(Key(id: "key-return", label: returnLabel, action: .newline, widthFraction: 0.15, style: .function))
 
         return KeyRow(id: "row-bottom", keys: keys)
     }
