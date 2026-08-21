@@ -1,0 +1,27 @@
+# macOS / iCloud
+.DS_Store
+.icloud
+*.icloud
+
+# Xcode (from M0 onward)
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Secrets / signing — never commit
+*.mobileprovision
+*.p12
+*.cer
+
+# Claude Code session state
+.claude/
