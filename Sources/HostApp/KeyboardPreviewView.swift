@@ -30,6 +30,13 @@ struct KeyboardPreviewView: View {
         .onAppear {
             model.handler = handler
             model.syncWithTextField()
+            // The host app's footprint, not the extension's — the number that counts against
+            // the 40 MB budget is the one the keyboard reports when running inside another
+            // app. This is here so the bar reads honestly rather than showing 0.0 MB.
+            model.diagnostics.startMemoryMonitor()
+        }
+        .onDisappear {
+            model.diagnostics.stopMemoryMonitor()
         }
     }
 
