@@ -17,7 +17,16 @@ options:
 
 settings:
   base:
+    # XcodeGen pins SWIFT_VERSION to 5.0 at project level whether you ask or not, so state
+    # it rather than discover it. Swift 5 mode makes isolation violations warnings instead
+    # of hard errors; the two settings below give Swift 6's code shape now, so flipping
+    # SWIFT_VERSION to "6.0" later is a one-line migration.
     SWIFT_VERSION: "5.0"
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    # Xcode applies this only to `application` product types, which would leave the app
+    # MainActor-isolated and the extension nonisolated — two concurrency worlds in one
+    # project. Setting it at project level keeps both targets consistent.
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"          # iPhone only
     MARKETING_VERSION: "0.1.0"

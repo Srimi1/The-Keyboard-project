@@ -58,6 +58,13 @@ final class KeyboardViewController: UIInputViewController {
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
 
+        // UIHostingController adds a bottom safe-area inset that `.ignoresSafeArea()` inside
+        // the SwiftUI view cannot remove; only this clears it. iOS 16.4+, and the deployment
+        // target is 16.0, so it needs the guard.
+        if #available(iOS 16.4, *) {
+            controller.safeAreaRegions = []
+        }
+
         addChild(controller)
         view.addSubview(controller.view)
         controller.didMove(toParent: self)
@@ -71,9 +78,11 @@ final class KeyboardViewController: UIInputViewController {
 
         hostingController = controller
 
-        // Opaque backgrounds render as a gray bar under iOS 26's glass container
-        // (CONSTRAINTS §8 gotcha ledger).
+        // Opaque backgrounds render as a gray bar under iOS 26's glass container, and it
+        // has to be cleared on all three layers — the input view included, not just this
+        // controller's view (CONSTRAINTS §8 gotcha ledger).
         view.backgroundColor = .clear
+        inputView?.backgroundColor = .clear
     }
 
     private func applyKeyboardHeight() {
@@ -109,7 +118,10 @@ extension KeyboardViewController: KeyboardActionHandler {
         textDocumentProxy.deleteBackward()
     }
 
-    func advanceToNextKeyboard() {
-        advanceToNextInputMode()
+    /// `.allTouchEvents` rather than `.touchUpInside`: `handleInputModeList(from:with:)`
+    /// needs the full event stream to distinguish a tap (advance) from a touch-and-hold
+    /// (show the keyboard picker).
+    func configureNextKeyboardButton(_ button: UIButton) {
+        button.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
     }
 }
