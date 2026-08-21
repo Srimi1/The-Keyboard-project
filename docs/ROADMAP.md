@@ -54,13 +54,13 @@
 - ✅ 4-row layout per [UI-SPEC.md](UI-SPEC.md) §1: 10/9/7 letter rows, centered home row, 15% shift/backspace, AOSP bottom-row widths, spacebar labeled "English (US)".
 - ✅ Layers: base, shifted, caps-lock, `?123`, `=\<` with correct layer-switch keys (§2). *Layer contents are still placeholders — blocked on V-03.*
 - ✅ Shift state machine: tap, double-tap caps lock, auto-capitalization honoring the field's `autocapitalizationType` (C-18).
-- ✅ Backspace hold-repeat accelerating into whole-word deletion; return-key labels from `returnKeyType`.
+- ✅ Backspace hold-repeat; return-key labels from `returnKeyType`. Held backspace accelerates to two characters per tick after 20 deletes — AOSP never escalates to word deletion, and Gboard's word delete is the slide-left gesture deferred with ADR-007.
 - ✅ Globe key conditional on `needsInputModeSwitchKey`, as a real UIButton on `.allTouchEvents` (C-21, C-47).
 - ✅ Key-preview popup on press; slide-off cancellation with hysteresis (§3–4).
 - ✅ **Multi-touch rollover** via a UIKit touch layer — SwiftUI gestures cannot express it (§3).
 - ✅ Light + dark palettes (§9) with a **transparent** keyboard background (CONSTRAINTS §8 gotcha ledger).
 - ✅ Keyboard height derived from key width so proportions hold across device classes; constraint at priority 999, re-applied on layout and rotation (C-22, C-45).
-- ⬜ Replace placeholder timings in `KeyboardTimings.swift` with the sourced AOSP constants.
+- ✅ Timings in `KeyboardTimings.swift` replaced with AOSP constants, each citing its source file.
 - ⬜ Resolve the 📐 MEASURE geometry from reference screenshots (V-01, V-02, V-03, V-08, V-11).
 
 **Verification so far:** 33 tests covering the typing rules and layout maths, all passing. The
