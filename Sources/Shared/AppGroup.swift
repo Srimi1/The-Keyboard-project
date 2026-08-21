@@ -6,7 +6,7 @@ import Foundation
 /// Both targets compile this file, so both get the same value by construction.
 enum AppGroup {
 
-    static let identifier = "group.com.srimi.keyboardproject"
+    static let identifier = "group.com.srijan.keyboardproject"
 
     /// Shared defaults suite. Non-nil does **not** prove the entitlement provisioned —
     /// use ``availability`` for that (see Q-01).
