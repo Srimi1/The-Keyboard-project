@@ -10,6 +10,7 @@ struct RootView: View {
         NavigationStack {
             List {
                 milestoneSection
+                previewSection
                 tryItSection
                 setupSection
                 verdictSection
@@ -43,6 +44,18 @@ struct RootView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private var previewSection: some View {
+        Section {
+            NavigationLink {
+                KeyboardPreviewView()
+            } label: {
+                Label("Keyboard preview", systemImage: "keyboard")
+            }
+        } footer: {
+            Text("Renders the real keyboard inside this app — for comparing against Gboard reference screenshots without switching keyboards.")
         }
     }
 
