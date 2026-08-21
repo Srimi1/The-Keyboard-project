@@ -9,7 +9,7 @@
 name: KeyboardProject
 
 options:
-  bundleIdPrefix: com.srimi
+  bundleIdPrefix: com.srijan
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "16.0"
@@ -39,7 +39,7 @@ targets:
       - path: Sources/HostApp
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.srimi.keyboardproject
+        PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject
         PRODUCT_NAME: KeyboardProject
         INFOPLIST_FILE: Sources/HostApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/HostApp/HostApp.entitlements
@@ -59,7 +59,7 @@ targets:
       - path: Sources/Keyboard
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.srimi.keyboardproject.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject.keyboard
         PRODUCT_NAME: KeyboardExtension
         INFOPLIST_FILE: Sources/Keyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/Keyboard/Keyboard.entitlements
