@@ -1,0 +1,77 @@
+# XcodeGen spec — the source of truth for the Xcode project.
+#
+# The .xcodeproj is generated, not edited by hand and not committed. Regenerate with:
+#     xcodegen generate
+#
+# Two targets, sharing Sources/Shared by compiling it into both (no shared framework —
+# a framework would add embedding overhead against the extension's memory budget, C-10).
+
+name: KeyboardProject
+
+options:
+  bundleIdPrefix: com.srimi
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "16.0"
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"          # iPhone only
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: NO          # explicit plists — the extension's NSExtension dict is load-bearing
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_EMIT_LOC_STRINGS: NO
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+
+  # ---------------------------------------------------------------- host app
+  KeyboardProject:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/Shared
+      - path: Sources/HostApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.srimi.keyboardproject
+        PRODUCT_NAME: KeyboardProject
+        INFOPLIST_FILE: Sources/HostApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/HostApp/HostApp.entitlements
+    dependencies:
+      - target: KeyboardExtension
+        embed: true
+
+  # -------------------------------------------------------- keyboard extension
+  # Bundle ID must stay under the host app's, and must never start a segment with
+  # "se." or "mn." — iOS has shipped bugs where such keyboards silently fail to
+  # appear in Settings (ADR-008).
+  KeyboardExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/Shared
+      - path: Sources/Keyboard
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.srimi.keyboardproject.keyboard
+        PRODUCT_NAME: KeyboardExtension
+        INFOPLIST_FILE: Sources/Keyboard/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/Keyboard/Keyboard.entitlements
+        SKIP_INSTALL: YES
+
+schemes:
+  KeyboardProject:
+    build:
+      targets:
+        KeyboardProject: all
+        KeyboardExtension: all
+    run:
+      config: Debug
+    archive:
+      config: Release
