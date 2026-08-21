@@ -47,6 +47,8 @@ final class KeyboardViewModel: ObservableObject {
         var selectedIndex: Int
     }
 
+    let feedback = FeedbackService()
+
     private var shift = ShiftController()
     private let repeater = KeyRepeater()
     private var lastSpaceAt: Date?
@@ -135,6 +137,9 @@ final class KeyboardViewModel: ObservableObject {
         pressedKeyIDs.insert(positioned.id)
         spaceSlideDistance = 0
 
+        // On press, not release: the tap should feel immediate, the way a real key does.
+        feedback.keyPressed()
+
         // Backspace is the one key that acts on press and repeats while held.
         if positioned.key.action == .backspace {
             markCommitted(touch.id)
@@ -184,8 +189,12 @@ final class KeyboardViewModel: ObservableObject {
         let width = calloutOptionWidth(for: callout)
         let origin = calloutOrigin(for: callout, optionWidth: width)
         let index = Int((point.x - origin) / width)
-        callout.selectedIndex = min(max(index, 0), callout.options.count - 1)
+        let clamped = min(max(index, 0), callout.options.count - 1)
+        guard clamped != callout.selectedIndex else { return }
+
+        callout.selectedIndex = clamped
         self.callout = callout
+        feedback.selectionChanged()
     }
 
     /// Kept here rather than in the view so selection and drawing agree — the same reason
@@ -244,6 +253,7 @@ final class KeyboardViewModel: ObservableObject {
 
         spaceSlideDistance += CGFloat(steps) * Self.spaceSlideStep
         handler?.adjustTextPosition(by: steps)
+        feedback.selectionChanged()
 
         // Once the caret has moved, releasing must not also insert a space.
         activeTouches[index].suppressesKeyOnRelease = true
