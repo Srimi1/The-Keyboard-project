@@ -27,6 +27,11 @@ final class KeyboardViewController: UIInputViewController {
         // keyboard — the key must not be drawn at all there (C-21).
         model.needsGlobe = needsInputModeSwitchKey
 
+        // Read here rather than in viewDidLoad: before the host connection exists the value
+        // is unreliable, and there is no notification when it changes (C-41).
+        model.feedback.hasFullAccess = hasFullAccess
+        model.feedback.prepare()
+
         model.diagnostics.startMemoryMonitor()
         model.diagnostics.runSafeProbes(hasFullAccess: hasFullAccess)
         model.syncWithTextField()
@@ -135,6 +140,18 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLayoutSubviews()
         if heightConstraint != nil { applyKeyboardHeight() }
     }
+}
+
+// MARK: - Audio feedback
+
+/// `UIDevice.playInputClick()` does nothing unless something in the input view hierarchy
+/// adopts this and returns true.
+///
+/// ⚠️ Apple documents the conformance on the *input view*; adopting it on the view controller
+/// is the widely-used form and is what this does. Whether clicks then actually sound — and
+/// whether they need Full Access at all — is **Q-03, unverified**. Confirm on device.
+extension KeyboardViewController: UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { true }
 }
 
 // MARK: - KeyboardActionHandler
