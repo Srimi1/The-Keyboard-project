@@ -105,6 +105,11 @@ private struct KeyGrid: View {
                         .allowsHitTesting(false)
                 }
 
+                if let callout = model.callout {
+                    CalloutBar(callout: callout, model: model, theme: theme)
+                        .allowsHitTesting(false)
+                }
+
                 // The globe key is a real UIButton underneath this layer, so its area must
                 // fall through rather than being consumed here (C-47).
                 TouchTracker(
@@ -210,6 +215,46 @@ private struct KeyFace: View {
         default:
             return .system(size: 20, weight: .regular)
         }
+    }
+}
+
+/// The accent / punctuation options shown while a key is held (UI-SPEC §5).
+///
+/// Positioned from the same numbers the model uses to decide which option the finger is over,
+/// so what is highlighted is always what will be inserted.
+private struct CalloutBar: View {
+    let callout: KeyboardViewModel.CalloutState
+    let model: KeyboardViewModel
+    let theme: KeyboardTheme
+
+    var body: some View {
+        let optionWidth = model.calloutOptionWidth(for: callout)
+        let originX = model.calloutOrigin(for: callout, optionWidth: optionWidth)
+        let height = callout.anchor.height
+
+        HStack(spacing: 0) {
+            ForEach(Array(callout.options.enumerated()), id: \.offset) { index, option in
+                Text(option)
+                    .font(.system(size: 20))
+                    .foregroundStyle(index == callout.selectedIndex ? Color.white : theme.keyLabel)
+                    .frame(width: optionWidth, height: height)
+                    .background(
+                        index == callout.selectedIndex ? theme.accent : Color.clear,
+                        in: RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                    )
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
+                .fill(theme.popupBackground)
+                .shadow(radius: 2, y: 1)
+        )
+        .position(
+            x: originX + optionWidth * CGFloat(callout.options.count) / 2,
+            // A keyboard cannot draw above its own top edge, so a callout on the top row sits
+            // just below it rather than floating outside (C-45).
+            y: max(height * 0.6, callout.anchor.minY - height * 0.65)
+        )
     }
 }
 

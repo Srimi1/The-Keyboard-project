@@ -10,6 +10,8 @@ import UIKit
 protocol KeyboardActionHandler: AnyObject {
     func insert(_ text: String)
     func deleteBackward()
+    /// Moves the caret by whole characters, for the spacebar cursor slide (UI-SPEC §6).
+    func adjustTextPosition(by offset: Int)
 
     /// Wires a real UIButton to `handleInputModeList(from:with:)`. A SwiftUI Button handles
     /// only tap and silently loses the long-press keyboard picker (C-47).
@@ -34,9 +36,28 @@ final class KeyboardViewModel: ObservableObject {
     let diagnostics = DiagnosticsRunner()
     weak var handler: KeyboardActionHandler?
 
+    /// The accent / punctuation callout currently open, if any.
+    @Published private(set) var callout: CalloutState?
+
+    struct CalloutState: Equatable {
+        let keyID: String
+        /// The held key's visual rect, so the callout can anchor above it.
+        let anchor: CGRect
+        let options: [String]
+        var selectedIndex: Int
+    }
+
     private var shift = ShiftController()
     private let repeater = KeyRepeater()
     private var lastSpaceAt: Date?
+
+    /// Set when double-space just produced ". ", so an immediate backspace can put the two
+    /// spaces back rather than leaving a bare ".".
+    private var revertibleDoubleSpace = false
+
+    private var longPressTask: Task<Void, Never>?
+    /// Accumulated horizontal travel of a finger sliding on the spacebar, in points.
+    private var spaceSlideDistance: CGFloat = 0
 
     /// Ordered by press time so rollover commits in the order keys were pressed, not the
     /// order fingers happened to lift.
@@ -46,6 +67,11 @@ final class KeyboardViewModel: ObservableObject {
         let id: ObjectIdentifier
         let keyID: String
         var committed: Bool
+        /// Where the finger landed, for measuring spacebar slide travel.
+        var startLocation: CGPoint
+        /// Once a finger opens a callout or starts sliding the caret, releasing it must not
+        /// also type the key it started on.
+        var suppressesKeyOnRelease: Bool = false
     }
 
     var rows: [KeyRow] {
@@ -103,8 +129,11 @@ final class KeyboardViewModel: ObservableObject {
         // so flush them in press order before registering this one (UI-SPEC §3).
         commitPendingPresses(positionedKeys: positionedKeys)
 
-        activeTouches.append(ActiveTouch(id: touch.id, keyID: positioned.id, committed: false))
+        activeTouches.append(
+            ActiveTouch(id: touch.id, keyID: positioned.id, committed: false, startLocation: touch.location)
+        )
         pressedKeyIDs.insert(positioned.id)
+        spaceSlideDistance = 0
 
         // Backspace is the one key that acts on press and repeats while held.
         if positioned.key.action == .backspace {
@@ -112,14 +141,80 @@ final class KeyboardViewModel: ObservableObject {
             repeater.start { [weak self] characterCount in
                 guard let self, let handler = self.handler else { return }
                 for _ in 0..<characterCount { handler.deleteBackward() }
+                self.revertibleDoubleSpace = false
                 self.syncWithTextField()
             }
+            return
         }
+
+        scheduleLongPress(for: positioned, touchID: touch.id)
+    }
+
+    // MARK: - Long press (UI-SPEC §5)
+
+    private func scheduleLongPress(for positioned: PositionedKey, touchID: ObjectIdentifier) {
+        longPressTask?.cancel()
+        guard let options = MoreKeys.options(for: positioned.key, shift: shiftState) else { return }
+
+        longPressTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(KeyboardTimings.longPressTimeout * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            // Only open if that same finger is still down and has not been committed by
+            // rollover in the meantime.
+            guard let active = self.activeTouches.first(where: { $0.id == touchID }), !active.committed else { return }
+
+            self.callout = CalloutState(
+                keyID: positioned.id,
+                anchor: positioned.rect,
+                options: options,
+                selectedIndex: 0
+            )
+            self.suppressKeyOnRelease(touchID)
+        }
+    }
+
+    private func suppressKeyOnRelease(_ id: ObjectIdentifier) {
+        guard let index = activeTouches.firstIndex(where: { $0.id == id }) else { return }
+        activeTouches[index].suppressesKeyOnRelease = true
+    }
+
+    /// Maps the finger's horizontal position across the callout to a selected option.
+    private func updateCalloutSelection(at point: CGPoint) {
+        guard var callout else { return }
+        let width = calloutOptionWidth(for: callout)
+        let origin = calloutOrigin(for: callout, optionWidth: width)
+        let index = Int((point.x - origin) / width)
+        callout.selectedIndex = min(max(index, 0), callout.options.count - 1)
+        self.callout = callout
+    }
+
+    /// Kept here rather than in the view so selection and drawing agree — the same reason
+    /// hit-testing and rendering share ``KeyboardMetrics``.
+    func calloutOptionWidth(for callout: CalloutState) -> CGFloat {
+        max(callout.anchor.width, 34)
+    }
+
+    func calloutOrigin(for callout: CalloutState, optionWidth: CGFloat) -> CGFloat {
+        let total = optionWidth * CGFloat(callout.options.count)
+        return callout.anchor.midX - total / 2
     }
 
     private func move(_ touch: KeyboardTouch, positionedKeys: [PositionedKey]) {
         guard let index = activeTouches.firstIndex(where: { $0.id == touch.id }) else { return }
         let active = activeTouches[index]
+
+        // A finger inside an open callout is choosing an accent, not still pressing the key.
+        if callout?.keyID == active.keyID {
+            updateCalloutSelection(at: touch.location)
+            return
+        }
+
+        // Sliding on the spacebar moves the caret instead of typing (UI-SPEC §6).
+        if active.keyID == spaceKeyID {
+            handleSpaceSlide(touch, index: index)
+            return
+        }
+
         guard !active.committed else { return }
 
         // Hysteresis so a slight drift keeps the key — without it, fast typing drops
@@ -130,22 +225,59 @@ final class KeyboardViewModel: ObservableObject {
             ?? false
 
         if !stillOnKey {
+            longPressTask?.cancel()
             pressedKeyIDs.remove(active.keyID)
             activeTouches.remove(at: index)
         }
     }
 
+    private let spaceKeyID = "key-space"
+
+    /// Slide the caret one character per threshold crossed, via `adjustTextPosition`.
+    ///
+    /// The proxy moves by grapheme clusters and clamps at the edge of the cached context
+    /// (C-18), so this cannot run off the end of what we can see.
+    private func handleSpaceSlide(_ touch: KeyboardTouch, index: Int) {
+        let travel = touch.location.x - activeTouches[index].startLocation.x
+        let steps = Int((travel - spaceSlideDistance) / Self.spaceSlideStep)
+        guard steps != 0 else { return }
+
+        spaceSlideDistance += CGFloat(steps) * Self.spaceSlideStep
+        handler?.adjustTextPosition(by: steps)
+
+        // Once the caret has moved, releasing must not also insert a space.
+        activeTouches[index].suppressesKeyOnRelease = true
+        longPressTask?.cancel()
+        syncWithTextField()
+    }
+
+    /// 📐 MEASURE (UI-SPEC §6): the points of travel per character step. AOSP does not expose
+    /// a constant for this, so it needs tuning against Gboard by feel.
+    private static let spaceSlideStep: CGFloat = 10
+
     private func end(_ touch: KeyboardTouch, positionedKeys: [PositionedKey]) {
         guard let index = activeTouches.firstIndex(where: { $0.id == touch.id }) else { return }
         let active = activeTouches.remove(at: index)
         pressedKeyIDs.remove(active.keyID)
+        longPressTask?.cancel()
 
         if active.keyID == backspaceKeyID {
             repeater.stop()
             return
         }
 
-        guard !active.committed,
+        // Releasing inside a callout picks the accent rather than typing the base letter.
+        if let callout, callout.keyID == active.keyID {
+            let selection = callout.options[callout.selectedIndex]
+            self.callout = nil
+            handler?.insert(selection)
+            shift.didInsertCharacter()
+            revertibleDoubleSpace = false
+            syncWithTextField()
+            return
+        }
+
+        guard !active.committed, !active.suppressesKeyOnRelease,
               let positioned = positionedKeys.first(where: { $0.id == active.keyID }) else { return }
         perform(positioned.key.action)
     }
@@ -181,6 +313,8 @@ final class KeyboardViewModel: ObservableObject {
         activeTouches.removeAll()
         pressedKeyIDs.removeAll()
         repeater.stop()
+        longPressTask?.cancel()
+        callout = nil
     }
 
     // MARK: - Actions
@@ -193,6 +327,7 @@ final class KeyboardViewModel: ObservableObject {
             handler.insert(text)
             shift.didInsertCharacter()
             lastSpaceAt = nil
+            revertibleDoubleSpace = false
             syncAfterEdit()
 
         case .space:
@@ -204,7 +339,16 @@ final class KeyboardViewModel: ObservableObject {
             syncAfterEdit()
 
         case .backspace:
-            handler.deleteBackward()
+            // Backspace straight after double-space put a period in restores the two spaces,
+            // rather than leaving a bare "." the user never asked for.
+            if revertibleDoubleSpace {
+                handler.deleteBackward()   // the space
+                handler.deleteBackward()   // the period
+                handler.insert("  ")
+                revertibleDoubleSpace = false
+            } else {
+                handler.deleteBackward()
+            }
             lastSpaceAt = nil
             syncAfterEdit()
 
@@ -240,9 +384,11 @@ final class KeyboardViewModel: ObservableObject {
             handler.deleteBackward()      // remove the first space
             handler.insert(". ")
             lastSpaceAt = nil
+            revertibleDoubleSpace = true
         } else {
             handler.insert(" ")
             lastSpaceAt = now
+            revertibleDoubleSpace = false
         }
 
         shift.didInsertCharacter()

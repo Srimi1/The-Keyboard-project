@@ -149,6 +149,12 @@ extension KeyboardViewController: KeyboardActionHandler {
         textDocumentProxy.deleteBackward()
     }
 
+    /// An offset of zero is a no-op inside the proxy, so skip the round trip entirely.
+    func adjustTextPosition(by offset: Int) {
+        guard offset != 0 else { return }
+        textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+    }
+
     /// `.allTouchEvents` rather than `.touchUpInside`: `handleInputModeList(from:with:)`
     /// needs the full event stream to distinguish a tap (advance) from a touch-and-hold
     /// (show the keyboard picker).

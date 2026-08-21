@@ -238,6 +238,56 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 }
 
+final class MoreKeysTests: XCTestCase {
+
+    private func key(_ character: String) -> Key { .letter(character) }
+
+    /// The corner hint glyph advertises the digit, so it has to be the first thing under the
+    /// finger when the key is held.
+    func testTopRowLeadsWithItsDigit() {
+        XCTAssertEqual(MoreKeys.options(for: key("q"), shift: .off)?.first, "1")
+        XCTAssertEqual(MoreKeys.options(for: key("p"), shift: .off)?.first, "0")
+        XCTAssertEqual(MoreKeys.options(for: key("e"), shift: .off)?.first, "3")
+    }
+
+    func testTopRowKeysAlsoOfferTheirAccents() {
+        let options = MoreKeys.options(for: key("e"), shift: .off) ?? []
+        XCTAssertEqual(options.first, "3")
+        XCTAssertTrue(options.contains("é"))
+    }
+
+    func testHomeRowAccentsHaveNoDigit() {
+        let options = MoreKeys.options(for: key("a"), shift: .off) ?? []
+        XCTAssertEqual(options.first, "à")
+        XCTAssertFalse(options.contains { $0.first?.isNumber == true })
+    }
+
+    /// Holding a shifted letter must offer capital accents, or shift silently stops applying.
+    func testShiftUppercasesAccents() {
+        let options = MoreKeys.options(for: key("A"), shift: .shifted) ?? []
+        XCTAssertTrue(options.contains("À"))
+        XCTAssertFalse(options.contains("à"))
+    }
+
+    func testLettersWithoutAccentsOrDigitsHaveNoOptions() {
+        XCTAssertNil(MoreKeys.options(for: key("x"), shift: .off))
+        XCTAssertNil(MoreKeys.options(for: key("v"), shift: .off))
+    }
+
+    func testPeriodOffersThePunctuationGrid() {
+        let options = MoreKeys.options(for: key("."), shift: .off) ?? []
+        XCTAssertGreaterThan(options.count, 8)
+        for expected in ["&", "%", "+", "#", "!", "@"] {
+            XCTAssertTrue(options.contains(expected), "punctuation grid is missing \(expected)")
+        }
+    }
+
+    func testFunctionKeysHaveNoOptions() {
+        let shift = Key(id: "key-shift", label: "⇧", action: .shift, widthFraction: 0.15, style: .function)
+        XCTAssertNil(MoreKeys.options(for: shift, shift: .off))
+    }
+}
+
 final class KeyboardMetricsTests: XCTestCase {
 
     private let size = CGSize(width: 390, height: 216)
