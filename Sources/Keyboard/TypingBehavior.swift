@@ -172,10 +172,12 @@ final class KeyRepeater {
     private var task: Task<Void, Never>?
 
     /// - Parameter fire: called immediately for the initial press, then on each repeat, with
-    ///   `deletesWord` true once repeats have accelerated past the per-character stage.
-    func start(fire: @escaping (_ deletesWord: Bool) -> Void) {
+    ///   the number of characters to remove. That count rises from one to two after
+    ///   `deletesBeforeAcceleration` repeats — AOSP's escalation, which never becomes a
+    ///   word-level delete.
+    func start(fire: @escaping (_ characterCount: Int) -> Void) {
         stop()
-        fire(false)
+        fire(1)
 
         task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.nanoseconds(KeyboardTimings.keyRepeatStartTimeout))
@@ -184,7 +186,8 @@ final class KeyRepeater {
             var repeatCount = 0
             while !Task.isCancelled {
                 repeatCount += 1
-                fire(repeatCount >= KeyboardTimings.repeatsBeforeWordDeletion)
+                let accelerated = repeatCount >= KeyboardTimings.deletesBeforeAcceleration
+                fire(accelerated ? KeyboardTimings.acceleratedDeleteCount : 1)
                 try? await Task.sleep(nanoseconds: Self.nanoseconds(KeyboardTimings.keyRepeatInterval))
             }
         }

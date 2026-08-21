@@ -106,11 +106,6 @@ final class PreviewActionHandler: ObservableObject, KeyboardActionHandler {
         text.removeLast()
     }
 
-    func deleteWordBackward() {
-        while let last = text.last, last.isWhitespace, !last.isNewline { text.removeLast() }
-        while let last = text.last, !last.isWhitespace { text.removeLast() }
-    }
-
     func configureNextKeyboardButton(_ button: UIButton) {
         button.isEnabled = false   // no keyboard to switch to from inside the app
     }

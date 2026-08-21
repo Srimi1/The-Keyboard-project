@@ -10,7 +10,6 @@ import UIKit
 protocol KeyboardActionHandler: AnyObject {
     func insert(_ text: String)
     func deleteBackward()
-    func deleteWordBackward()
 
     /// Wires a real UIButton to `handleInputModeList(from:with:)`. A SwiftUI Button handles
     /// only tap and silently loses the long-press keyboard picker (C-47).
@@ -110,13 +109,9 @@ final class KeyboardViewModel: ObservableObject {
         // Backspace is the one key that acts on press and repeats while held.
         if positioned.key.action == .backspace {
             markCommitted(touch.id)
-            repeater.start { [weak self] deletesWord in
+            repeater.start { [weak self] characterCount in
                 guard let self, let handler = self.handler else { return }
-                if deletesWord {
-                    handler.deleteWordBackward()
-                } else {
-                    handler.deleteBackward()
-                }
+                for _ in 0..<characterCount { handler.deleteBackward() }
                 self.syncWithTextField()
             }
         }
