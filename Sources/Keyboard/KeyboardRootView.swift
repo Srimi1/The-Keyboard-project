@@ -79,7 +79,11 @@ private struct KeyGrid: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let keys = KeyboardMetrics.positionedKeys(rows: model.rows, in: geometry.size)
+            // iOS hands a keyboard extension 0×0, then full-screen, then a wrong height before
+            // settling; solving against those produces briefly-wrong hit rects (C-45).
+            let keys = KeyboardMetrics.isPlausible(geometry.size)
+                ? KeyboardMetrics.positionedKeys(rows: model.rows, in: geometry.size)
+                : []
 
             ZStack(alignment: .topLeading) {
                 ForEach(keys) { positioned in
@@ -101,10 +105,21 @@ private struct KeyGrid: View {
                         .allowsHitTesting(false)
                 }
 
-                TouchTracker { touches in
-                    model.handle(touches: touches, positionedKeys: keys)
-                }
+                // The globe key is a real UIButton underneath this layer, so its area must
+                // fall through rather than being consumed here (C-47).
+                TouchTracker(
+                    onTouches: { touches in
+                        model.handle(touches: touches, positionedKeys: keys)
+                    },
+                    passthroughRects: keys
+                        .filter { $0.key.action == .nextKeyboard }
+                        .map(\.hitRect)
+                )
             }
+            .onChange(of: geometry.size, perform: { _ in
+                // Geometry changed under the fingers; anything still tracked is stale.
+                model.releaseAllTouches()
+            })
         }
     }
 
@@ -131,6 +146,9 @@ private struct KeyGrid: View {
                 isPressed: model.pressedKeyIDs.contains(positioned.id),
                 isActive: isActive(positioned.key)
             )
+            // Drawing only — the touch layer above owns input. Without this SwiftUI competes
+            // for the touch and walks its view tree on every touchesMoved for no benefit.
+            .allowsHitTesting(false)
         }
     }
 

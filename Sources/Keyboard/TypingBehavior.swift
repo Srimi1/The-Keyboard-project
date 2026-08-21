@@ -72,28 +72,67 @@ enum AutoCapitalization {
         }
     }
 
+    /// Follows AOSP LatinIME's `CapsModeUtils.getCapsMode` — the algorithm behind Gboard's
+    /// shift behavior, so this is imitation rather than invention (ADR-001).
+    ///
+    /// The steps that are easy to miss: opening punctuation the user just typed is skipped
+    /// (`Hello. "` still starts a sentence), American typography puts the period inside the
+    /// closing quote (`he said "hi." ` starts a sentence), and a period that ends an
+    /// abbreviation does not (`e.g. ` must not capitalize).
     private static func isSentenceStart(_ context: String?) -> Bool {
-        // Nothing before the cursor: start of the field.
+        // The proxy returns nil rather than "" when there is nothing before the cursor.
         guard let context, !context.isEmpty else { return true }
+        var characters = Array(context)
 
-        // Trailing whitespace is what separates "end of sentence" from "mid-word".
-        let trimmed = context.reversed().drop { $0 == " " || $0 == "\u{00A0}" }
-        guard let lastNonSpace = trimmed.first else {
-            // Only whitespace before the cursor — still effectively a start.
-            return true
+        // 1. Skip trailing opening punctuation — the quote or bracket just typed is not
+        //    itself a reason to stop capitalizing.
+        while let last = characters.last, openingPunctuation.contains(last) {
+            characters.removeLast()
         }
 
-        if lastNonSpace.isNewline { return true }
+        // 2. Walk back over spaces and tabs, remembering whether there were any.
+        var sawWhitespace = false
+        while let last = characters.last, last == " " || last == "\t" || last == "\u{00A0}" {
+            characters.removeLast()
+            sawWhitespace = true
+        }
 
-        // A terminator only starts a new sentence once a space follows it, so "Hello." does
-        // not capitalize but "Hello. " does.
-        let hadTrailingSpace = context.last == " " || context.last == "\u{00A0}"
-        guard hadTrailingSpace else { return false }
+        // 3. Start of text or a newline begins a sentence.
+        guard let lastCharacter = characters.last else { return true }
+        if lastCharacter.isNewline { return true }
 
-        return sentenceTerminators.contains(lastNonSpace)
+        // No whitespace between the cursor and the previous word means we are inside it.
+        guard sawWhitespace else { return false }
+
+        // 4. Skip closing quotes: American typography puts the terminator inside them.
+        while let last = characters.last, closingQuotes.contains(last) {
+            characters.removeLast()
+        }
+        guard let terminator = characters.last else { return true }
+
+        // 5. Question and exclamation marks always end a sentence.
+        if exclamationTerminators.contains(terminator) { return true }
+
+        // 6. A period ends a sentence unless it ends an abbreviation.
+        guard periodTerminators.contains(terminator) else { return false }
+        return !endsWithAbbreviation(characters)
     }
 
-    private static let sentenceTerminators: Set<Character> = [".", "!", "?", "。", "！", "？"]
+    /// "e.g." and "U.S." end in a period but do not end a sentence. The tell is a single
+    /// letter sitting between two periods.
+    private static func endsWithAbbreviation(_ characters: [Character]) -> Bool {
+        var scan = characters
+        scan.removeLast()                                   // the terminating period
+        guard let letter = scan.last, letter.isLetter else { return false }
+        scan.removeLast()
+        guard let preceding = scan.last else { return false }
+        return periodTerminators.contains(preceding)
+    }
+
+    private static let periodTerminators: Set<Character> = [".", "。"]
+    private static let exclamationTerminators: Set<Character> = ["!", "?", "！", "？"]
+    private static let openingPunctuation: Set<Character> = ["\"", "'", "(", "[", "{", "«", "¿", "¡", "“", "‘"]
+    private static let closingQuotes: Set<Character> = ["\"", "'", ")", "]", "}", "»", "”", "’"]
 }
 
 // MARK: - Return key

@@ -57,6 +57,35 @@ final class AutoCapitalizationTests: XCTestCase {
         XCTAssertTrue(shouldCapitalize("hel", .allCharacters))
     }
 
+    // MARK: - AOSP getCapsMode rules
+
+    /// "e.g. " and "U.S. " end in a period but not a sentence.
+    func testAbbreviationsDoNotCapitalize() {
+        XCTAssertFalse(shouldCapitalize("For example, e.g. "))
+        XCTAssertFalse(shouldCapitalize("I live in the U.S. "))
+    }
+
+    /// "Dr." is indistinguishable from a sentence end, and AOSP capitalizes — the tell for an
+    /// abbreviation is a single letter between two periods.
+    func testTitlesStillCapitalize() {
+        XCTAssertTrue(shouldCapitalize("Hello Dr. "))
+    }
+
+    /// Opening punctuation the user just typed is not a reason to stop capitalizing.
+    func testOpeningPunctuationIsSkipped() {
+        XCTAssertTrue(shouldCapitalize("Hello. \""))
+        XCTAssertTrue(shouldCapitalize("Hello. ("))
+    }
+
+    /// American typography puts the terminator inside the closing quote.
+    func testClosingQuoteAfterTerminatorCapitalizes() {
+        XCTAssertTrue(shouldCapitalize("He said \"hi.\" "))
+    }
+
+    func testTabCountsAsWhitespace() {
+        XCTAssertTrue(shouldCapitalize("Hello.\t"))
+    }
+
     func testWordsCapitalizesAfterAnySpace() {
         XCTAssertTrue(shouldCapitalize("hello ", .words))
         XCTAssertFalse(shouldCapitalize("hel", .words))
@@ -259,7 +288,7 @@ final class KeyboardMetricsTests: XCTestCase {
     }
 
     /// Hysteresis keeps a drifting finger on its key; without it fast typing drops
-    /// characters at key edges.
+    /// characters at key edges. Measured from the visual rect, not the hit rect.
     func testHysteresisKeepsAJustOffKeyTouch() {
         let all = keys()
         guard let key = all.first(where: { $0.id == "key-g" }) else {
@@ -267,10 +296,74 @@ final class KeyboardMetricsTests: XCTestCase {
         }
         let justPastEdge = CGPoint(x: key.rect.maxX + 3, y: key.rect.midY)
 
-        let withoutSlack = KeyboardMetrics.key(at: justPastEdge, in: [key], hysteresis: 0)
-        let withSlack = KeyboardMetrics.key(at: justPastEdge, in: [key], hysteresis: 8)
-        XCTAssertNil(withoutSlack)
-        XCTAssertEqual(withSlack?.id, key.id)
+        XCTAssertFalse(KeyboardMetrics.isStillOnKey(justPastEdge, key: key, hysteresis: 0))
+        XCTAssertTrue(KeyboardMetrics.isStillOnKey(justPastEdge, key: key, hysteresis: 8))
+    }
+
+    /// Regression guard for a real bug: hit-testing against the *visual* rects left the gaps
+    /// between keys, the home row's half-key inset, and the edge margins as dead zones that
+    /// silently swallowed keystrokes. Hit rects must tile the whole area.
+    func testEveryPointInTheKeyboardResolvesToAKey() {
+        let all = keys()
+        var misses: [CGPoint] = []
+
+        for x in stride(from: CGFloat(1), to: size.width, by: 3) {
+            for y in stride(from: CGFloat(1), to: size.height, by: 3) {
+                let point = CGPoint(x: x, y: y)
+                if KeyboardMetrics.key(at: point, in: all) == nil {
+                    misses.append(point)
+                }
+            }
+        }
+
+        XCTAssertTrue(misses.isEmpty, "\(misses.count) dead points, first at \(misses.first.map(String.init(describing:)) ?? "-")")
+    }
+
+    func testHitRectsDoNotOverlap() {
+        let all = keys()
+        for (index, key) in all.enumerated() {
+            for other in all[(index + 1)...] where key.hitRect.intersects(other.hitRect) {
+                let overlap = key.hitRect.intersection(other.hitRect)
+                XCTAssertTrue(
+                    overlap.width < 0.01 || overlap.height < 0.01,
+                    "\(key.id) and \(other.id) hit boxes overlap by \(overlap)"
+                )
+            }
+        }
+    }
+
+    /// The gap between two keys must belong to one of them, not to nothing.
+    func testGapBetweenKeysIsClaimed() {
+        let all = keys()
+        guard let f = all.first(where: { $0.id == "key-f" }),
+              let g = all.first(where: { $0.id == "key-g" }) else {
+            return XCTFail("expected F and G keys")
+        }
+        let midGap = CGPoint(x: (f.rect.maxX + g.rect.minX) / 2, y: f.rect.midY)
+        let hit = KeyboardMetrics.key(at: midGap, in: all)
+        XCTAssertNotNil(hit)
+        XCTAssertTrue(hit?.id == f.id || hit?.id == g.id)
+    }
+
+    /// The home row is inset by a half key; that inset must still be touchable, or the A and
+    /// L keys are unreachable from the screen edge.
+    func testHomeRowInsetIsTouchable() {
+        let all = keys()
+        guard let a = all.first(where: { $0.id == "key-a" }) else {
+            return XCTFail("expected an A key")
+        }
+        let insetPoint = CGPoint(x: 2, y: a.rect.midY)
+        XCTAssertEqual(KeyboardMetrics.key(at: insetPoint, in: all)?.id, a.id)
+    }
+
+    /// Solving against the garbage sizes iOS hands an extension while it settles produces
+    /// briefly-wrong hit rects.
+    func testImplausibleSizesProduceNoKeys() {
+        let rows = KeyboardLayout.rows(layer: .base, shift: .off, needsGlobe: false)
+        XCTAssertFalse(KeyboardMetrics.isPlausible(.zero))
+        XCTAssertTrue(KeyboardMetrics.positionedKeys(rows: rows, in: .zero).isEmpty)
+        XCTAssertTrue(KeyboardMetrics.positionedKeys(rows: rows, in: CGSize(width: 390, height: 4)).isEmpty)
+        XCTAssertTrue(KeyboardMetrics.isPlausible(size))
     }
 
     func testRowsFillTheAvailableWidth() {

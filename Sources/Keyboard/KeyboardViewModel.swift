@@ -94,6 +94,10 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     private func begin(_ touch: KeyboardTouch, positionedKeys: [PositionedKey]) {
+        // UIKit recycles UITouch objects between sequences, so an identity can collide with a
+        // stale entry that never saw its ended/cancelled.
+        activeTouches.removeAll { $0.id == touch.id }
+
         guard let positioned = KeyboardMetrics.key(at: touch.location, in: positionedKeys) else { return }
 
         // Rollover: a new finger landing means every key still held has been "typed past",
@@ -124,10 +128,10 @@ final class KeyboardViewModel: ObservableObject {
         guard !active.committed else { return }
 
         // Hysteresis so a slight drift keeps the key — without it, fast typing drops
-        // characters at key edges.
+        // characters at key edges. Measured from the visual rect (see isStillOnKey).
         let stillOnKey = positionedKeys
             .first { $0.id == active.keyID }
-            .map { $0.rect.insetBy(dx: -KeyboardTimings.keyHysteresis, dy: -KeyboardTimings.keyHysteresis).contains(touch.location) }
+            .map { KeyboardMetrics.isStillOnKey(touch.location, key: $0, hysteresis: KeyboardTimings.keyHysteresis) }
             ?? false
 
         if !stillOnKey {
@@ -175,6 +179,15 @@ final class KeyboardViewModel: ObservableObject {
 
     private let backspaceKeyID = "key-backspace"
 
+    /// Drops every tracked finger and clears the pressed highlight. Called when the geometry
+    /// or layer changes underneath the touches, since the view is never rebuilt and a
+    /// stranded pointer would otherwise stay pressed for the life of the extension.
+    func releaseAllTouches() {
+        activeTouches.removeAll()
+        pressedKeyIDs.removeAll()
+        repeater.stop()
+    }
+
     // MARK: - Actions
 
     func perform(_ action: KeyAction) {
@@ -206,6 +219,9 @@ final class KeyboardViewModel: ObservableObject {
 
         case .switchLayer(let target):
             layer = target
+            // The extension's view is never torn down, so a finger still down across a layer
+            // switch would stay "pressed" forever and its key would never clear.
+            releaseAllTouches()
 
         case .nextKeyboard:
             break   // handled by NextKeyboardButton — needs UIKit target-action (C-47)
