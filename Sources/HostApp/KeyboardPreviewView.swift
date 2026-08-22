@@ -1,3 +1,8 @@
+// Development-only, with the rest of the development surface (ADR-011). Both call
+// sites — RootView's preview row and the `-keyboardPreview` launch argument — are
+// Debug-gated, so this whole file compiles out of Release.
+#if DEBUG
+
 import SwiftUI
 import UIKit
 
@@ -125,3 +130,5 @@ final class PreviewActionHandler: ObservableObject, KeyboardActionHandler {
     var autocapitalizationType: UITextAutocapitalizationType { .sentences }
     var returnKeyType: UIReturnKeyType { .default }
 }
+
+#endif

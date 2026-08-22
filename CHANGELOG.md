@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button into this app's Settings page; the M0 verdicts, keyboard report and memory readings
   moved to a Debug-only Developer section. After setup the keyboard is reached from the globe
   key and the app never needs opening again.
+- The keyboard preview is Debug-only as well — it exists for Gboard side-by-side comparison,
+  which is development, not a feature. Gating it let the linker drop the keyboard-render graph
+  from the host app binary (1.3 MB → 653 KB).
 - The keyboard's strip no longer shows the `"M1"` label or a memory readout in Release. Its
   height is kept as reserved space for M4's suggestion bar, so Debug and Release keyboards
   stay the same shape.

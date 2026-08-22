@@ -175,7 +175,14 @@ class KeyboardUITestCase: XCTestCase {
     // MARK: - Key geometry
 
     /// The rows as `KeyboardLayout` builds them, per layer, as (label, widthFraction).
-    /// `needsGlobe` is false in the preview (Face ID simulator), so the comma is present.
+    ///
+    /// ⚠️ These rows are the **preview's** bottom row, not the shipping one. `KeyboardPreviewView`
+    /// never sets `needsGlobe`, so it defaults to false and the comma keeps its slot — nothing
+    /// to do with Face ID, which is what an earlier version of this comment claimed. On a real
+    /// iPhone `needsInputModeSwitchKey` is **true** (Q-10, measured 2026-08-22), so the globe
+    /// takes that slot and the comma moves to the period's long-press set, where AOSP puts it
+    /// first. Both keys are 0.10 wide, so every coordinate below is correct either way — what
+    /// these tests never exercise is the globe key itself.
     enum Layer { case base, symbols, extendedSymbols }
 
     private static let bottomRow: [(String, Double)] =

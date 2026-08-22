@@ -107,21 +107,33 @@ side-by-side comparison below can be done without switching keyboards
   verified with `nm`); the Debug readout was fixed to actually update. What ships instead is
   `KeyboardHandshake` — one small record, written off the main thread and only when it changed
   or went stale, which is all the host app's checklist needs.
+- ✅ **The keyboard preview is Debug-only too** (2026-08-22). It exists to compare against Gboard
+  reference screenshots, so it is a development tool, not a feature — and a launch argument is
+  not a supported way for anyone to reach a screen in a shipping build. Gating it let the linker
+  drop the whole keyboard-render graph from the host app: **1.3 MB → 653 KB**, and the app to
+  **2.6 MB** from 4.3 MB at the start of the day.
+- ⬜ **The preview does not render the shipping bottom row.** `KeyboardPreviewView` never sets
+  `needsGlobe`, so it always draws the **comma**; on a real iPhone `needsInputModeSwitchKey` is
+  true (Q-10), so the **globe** takes that slot and the comma moves to the period's long-press
+  set. Both keys are 0.10 wide, so no geometry or test coordinate is affected — but the next
+  task is the Gboard side-by-side comparison, and comparing a bottom row that does not ship is
+  a trap. Decide before the screenshot pass: either default the preview to `needsGlobe = true`
+  and give the UI tests a launch argument to force it false, or accept the gap knowingly.
 - ✅ **The `"M1"` label and live MB readout are gone from Release** (they were an M5 blocker).
   The strip keeps its height as reserved space for M4's suggestion bar, so Debug and Release
   keyboards stay the same shape and today's geometry measurements remain valid.
-- ⬜ **Q-10 — the globe key.** `needsInputModeSwitchKey` is currently trusted to decide whether
-  a globe key is drawn at all (C-21, unverified). If it returns false where no system globe
-  exists, the user is stranded on this keyboard — and failing to provide a next-keyboard method
-  is a confirmed App Review rejection (C-30, 4.4.1). Debug builds now show the live value in the
-  strip; read it on device and record the verdict before changing behavior.
+- ✅ **Q-10 — the globe key: ANSWERED 2026-08-22, no change needed.** `needsInputModeSwitchKey`
+  returns **true** on iPhone 14 / iOS 26.5 in Notes, Messages and Safari, and the keyboard draws
+  its own globe in each. C-21's "false on Face ID iPhones" clause was **wrong** and has been
+  corrected against device evidence. The conditional stays — 4.4.1 makes a next-keyboard method
+  mandatory — but the expectation behind it is now measured rather than assumed.
 - ⬜ Resolve the remaining 📐 MEASURE items from reference screenshots — especially **V-06, the period grid's contents and ordering**.
 - ⬜ Side-by-side screenshot comparison; fix every visible delta.
 
 **Exit criteria**
 - ⬜ You (the Android Gboard user) report **no muscle-memory misses** on layout or long-press over a full day. *(needs a device)*
 - ⬜ All V-01…V-08 measurements resolved and reflected in UI-SPEC.md. *(blocked on the M0 screenshots)*
-- ⬜ ≤ 40 MB.
+- ✅ **≤ 40 MB — met. 12.4 MB measured** on iPhone 14 / iOS 26.5, 2026-08-22, in the extension while typing: 31% of budget. Debug build, so Release is at or below it. Re-measure after M3's clipboard store, which is the first feature that holds data.
 
 ---
 
