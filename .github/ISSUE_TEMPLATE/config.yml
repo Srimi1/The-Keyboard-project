@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Reporting
+    url: https://github.com/Srimi1/The-Keyboard-project/security/advisories/new
+    about: Privately report sensitive security and privacy vulnerabilities.
+  - name: Architecture & Constraints Docs
+    url: https://github.com/Srimi1/The-Keyboard-project/tree/main/docs
+    about: Read platform constraints, decision records (ADRs), and UI specs before opening issues.

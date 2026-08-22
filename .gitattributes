@@ -1,0 +1,19 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Swift & config files
+*.swift text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.plist text eol=lf
+*.entitlements text eol=lf
+*.xcprivacy text eol=lf
+
+# Binary media
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.car binary
