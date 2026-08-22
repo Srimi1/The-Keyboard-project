@@ -9,13 +9,17 @@ struct KeyboardRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StatusBar(model: model, theme: theme)
+            Strip(model: model, theme: theme)
 
+            #if DEBUG
             if model.showDiagnostics {
                 DiagnosticsPanel(model: model, theme: theme)
             } else {
                 KeyGrid(model: model, theme: theme)
             }
+            #else
+            KeyGrid(model: model, theme: theme)
+            #endif
         }
         // Transparent, never an opaque fill — iOS 26 wraps keyboards in a system glass
         // container and an opaque background renders as a gray bar (CONSTRAINTS §8).
@@ -23,23 +27,60 @@ struct KeyboardRootView: View {
     }
 }
 
-// MARK: - Status bar
+// MARK: - Strip
 //
-// M0/M1 scaffolding. The real suggestion strip and toolbar arrive at M4 (UI-SPEC.md §7).
+// The band above the keys. M4 fills it with the suggestion bar and idle toolbar
+// (UI-SPEC.md §7); until then it is **reserved space, deliberately empty**.
+//
+// It is not collapsed to zero on purpose: the keyboard's total height is derived from it
+// (`KeyboardMetrics.preferredKeyboardHeight`), so a Release build that dropped the strip
+// would be 28 pt shorter than every geometry measurement taken so far and than the Debug
+// build the UI-test coordinate calibration is built against.
 
-private struct StatusBar: View {
+private struct Strip: View {
     @ObservedObject var model: KeyboardViewModel
     let theme: KeyboardTheme
 
     var body: some View {
+        Group {
+            #if DEBUG
+            DebugStripContent(model: model, runner: model.diagnostics, theme: theme)
+            #else
+            Color.clear
+            #endif
+        }
+        .frame(height: KeyboardTheme.stripHeight)
+    }
+}
+
+#if DEBUG
+/// The milestone label, live memory readout and diagnostics toggle — a development tool.
+///
+/// `runner` is observed directly rather than reached through `model.diagnostics`. A nested
+/// `ObservableObject` does not forward `objectWillChange`, so the previous version's memory
+/// figure never actually updated: the 1 Hz timer ran purely to mutate a value nothing was
+/// watching.
+private struct DebugStripContent: View {
+    @ObservedObject var model: KeyboardViewModel
+    @ObservedObject var runner: DiagnosticsRunner
+    let theme: KeyboardTheme
+
+    var body: some View {
         HStack(spacing: 8) {
-            Text("M1")
+            Text("DEBUG")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.hintGlyph)
 
             Spacer()
 
-            Text(String(format: "%.1f MB", model.diagnostics.memoryMB))
+            // Q-10: what `needsInputModeSwitchKey` actually returns on this device, in this
+            // host app. If it is false and no system globe is drawn below the keyboard, the
+            // user is stranded on our keyboard — see CONSTRAINTS §10.
+            Text("globe \(model.needsGlobe ? "yes" : "NO")")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(model.needsGlobe ? theme.hintGlyph : .orange)
+
+            Text(String(format: "%.1f MB", runner.memoryMB))
                 .font(.system(size: 11, weight: .medium).monospacedDigit())
                 .foregroundStyle(memoryColor)
 
@@ -53,17 +94,17 @@ private struct StatusBar: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
-        .frame(height: KeyboardTheme.diagnosticsBarHeight)
     }
 
     private var memoryColor: Color {
-        switch model.diagnostics.memoryVerdict {
+        switch runner.memoryVerdict {
         case .withinBudget: return theme.hintGlyph
         case .overBudget: return .orange
         case .critical: return .red
         }
     }
 }
+#endif
 
 // MARK: - Key grid
 

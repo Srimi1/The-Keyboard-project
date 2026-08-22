@@ -1,3 +1,8 @@
+// Development-only, and compiled out of Release with `DiagnosticsRunner`. This panel is
+// how the M0 verdicts (Q-01, Q-03, Q-05) and the C-10 memory reading are read off a real
+// device — it must never be reachable in a shipping build.
+#if DEBUG
+
 import SwiftUI
 
 /// The M0 test results, shown inside the keyboard itself.
@@ -180,3 +185,5 @@ struct DiagnosticsPanel: View {
         }
     }
 }
+
+#endif

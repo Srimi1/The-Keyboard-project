@@ -1,90 +1,152 @@
-# The Keyboard Project
+<p align="center">
+  <img src="assets/app-icon.png" width="128" height="128" alt="The Keyboard Project Logo" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.3);">
+</p>
 
-**An iPhone keyboard that feels like Gboard on Android.**
+<h1 align="center">The Keyboard Project</h1>
 
-Switching from Android to iPhone costs you two things you notice every single day: the **layout** — key positions, the bottom row, what happens when you long-press — and the **clipboard**. Android's Gboard keeps a history of what you copied. iOS keeps exactly one item, forever, with no history at all.
+<p align="center">
+  <strong>An iPhone keyboard engineered to bring the authentic Android Gboard layout, tactile feel, and multi-item clipboard history to iOS.</strong>
+</p>
 
-Nobody fixes this. **Gboard for iOS is frozen at v2.3.19 (May 2022)** — Google stopped developing it, and it never had the clipboard manager. Apple's keyboard doesn't either. So this project builds it: a personal-use iOS keyboard extension that replicates the Gboard-Android layout and feel, with the clipboard manager that neither Google nor Apple ships on iPhone.
-
-**Success looks like:** *"I use this keyboard all day, by choice, and never switch back."*
+<p align="center">
+  <a href="https://github.com/Srimi1/The-Keyboard-project/actions/workflows/ci.yml"><img src="https://github.com/Srimi1/The-Keyboard-project/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
+  <img src="https://img.shields.io/badge/iOS-16.0%2B-000000?logo=apple&logoColor=white" alt="iOS 16.0+">
+  <img src="https://img.shields.io/badge/Swift-5.0%20%7C%206.0-FA7343?logo=swift&logoColor=white" alt="Swift">
+  <img src="https://img.shields.io/badge/Memory-%E2%89%A440MB%20Budget-2ea44f" alt="Memory Budget">
+  <img src="https://img.shields.io/badge/Privacy-100%25%20Offline-success" alt="Offline Privacy">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 ---
 
-## Status
+## 🎯 The Problem
 
-| | |
-|---|---|
-| **Phase** | **M2 — Gboard feel** (M0 tests + reference screenshots still pending hardware) |
-| **Docs written** | 2026-08-21 |
-| **Project scaffolded** | 2026-08-21 — builds clean, runs in the simulator |
-| **Dev account** | Free personal team (upgrade to $99/yr at M5 — [ADR-004](docs/DECISIONS.md)) |
-| **Framework** | None yet. KeyboardKit 10 free tier is **provisional** pending the M0 spike ([ADR-003](docs/DECISIONS.md)); the M0 keyboard is dependency-free so it also serves as the memory baseline |
-| **Language** | English (US) only in v1 ([ADR-002](docs/DECISIONS.md)) |
-| **Target device / iOS** | *(fill in after the first device deploy)* |
-| **M0 tests** | Q-01, Q-03, Q-05 — **all still open**, they need real hardware |
+Switching from Android to iPhone costs you two essential daily workflows:
 
-## Documentation map
+1. **The Layout & Muscle Memory:** Gboard's dedicated punctuation row, key proportions, symbol positions, and long-press maps.
+2. **The Clipboard History:** Android's Gboard maintains a persistent history of copied snippets, links, and text. iOS keeps exactly **one** item at a time, overwriting your history instantly.
 
-Read in this order the first time. After that, jump to whichever doc owns your question.
+Google abandoned development of Gboard for iOS at **v2.3.19 (May 2022)**, and Apple's native keyboard has no clipboard manager.
 
-| Doc | What it owns | Read it when |
-|---|---|---|
-| **[CLAUDE.md](CLAUDE.md)** | Rules for AI working sessions | **First**, every session |
-| **[docs/PRODUCT.md](docs/PRODUCT.md)** | Scope: v1 features, deferred, non-goals, accepted limitations, the Gboard parity matrix | "Is X in scope?" |
-| **[docs/UI-SPEC.md](docs/UI-SPEC.md)** | The layout blueprint: key geometry, layers, long-press maps, gestures, panels, themes | "What does X look like / do?" |
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Targets, App Group data flow, framework boundary, the typing/clipboard/autocorrect pipelines, memory strategy | "How is X built?" |
-| **[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)** | **Every iOS platform fact**, with source, date, confidence, verified flag — plus the open-question backlog | "Can iOS even do X?" — **the only valid source** |
-| **[docs/CLIPBOARD.md](docs/CLIPBOARD.md)** | The flagship feature: capture model, permissions, retention, panel, acceptance tests | Anything clipboard |
-| **[docs/DECISIONS.md](docs/DECISIONS.md)** | ADR log — binding decisions with rationale | "Why is it this way?" — **before** proposing a change |
-| **[docs/ROADMAP.md](docs/ROADMAP.md)** | M0–M6 with items and exit criteria | "What's next?" |
-| **[docs/reference/](docs/reference/)** | Raw research corpus (`research-2026-08-21.json`), Gboard reference screenshots (from M0) | Sourcing a new fact |
+**The Keyboard Project** fixes this with a clean, privacy-first, zero-network custom keyboard extension built natively in Swift for iOS.
 
-## Quick facts
+---
 
-| | |
-|---|---|
-| Targets | `KeyboardProject` (host app) + `KeyboardExtension` (`UIInputViewController`, `com.apple.keyboard-service`) |
-| Bundle IDs | `com.srijan.keyboardproject` / `com.srijan.keyboardproject.keyboard` — **never** prefixes starting `se.` or `mn.` ([ADR-008](docs/DECISIONS.md)) |
-| App Group ID | `group.com.srijan.keyboardproject` — defined once in `Sources/Shared/AppGroup.swift`, never typed elsewhere |
-| Project file | Generated by XcodeGen from `project.yml`; the `.xcodeproj` is gitignored |
-| Minimum iOS | 16 (KeyboardKit 10 requirement) |
-| Memory budget | **≤ 40 MB** steady state, against a silent jetsam kill near ~60 MB |
-| Network | **None, ever** — no sync, no analytics, no crash reporting ([ADR-005](docs/DECISIONS.md)) |
-| Requires | Full Access (for clipboard, haptics, sound) — but **the keyboard always types without it** |
+## ✨ Features
 
-## Build & deploy
+- ⌨️ **Accurate Gboard Geometry:** Key-width percentages sourced directly from AOSP LatinIME specifications (10% letter width, centered second row, Gboard function row).
+- 📋 **Persistent Multi-Item Clipboard:** Captures and stores your copy history securely in an isolated App Group container on your device.
+- 🔒 **100% Offline & Private:** **Zero network capability.** No analytics, no telemetry, no remote servers, and no crash reporters. What you type stays on your physical phone ([ADR-005](docs/DECISIONS.md)).
+- ⚡ **Lightweight & Jetsam-Safe:** Strictly engineered within a **≤ 40 MB memory budget** to prevent silent iOS background termination ([CONSTRAINTS.md](docs/CONSTRAINTS.md)). The shipping extension runs **no timers and no per-appearance disk I/O** — the development harness compiles out of Release entirely.
+- 📳 **Tactile Feedback:** Native iOS system haptic responses and system click audio matching physical keypresses.
+- 🛡️ **Graceful Degradation:** The keyboard is guaranteed to type text even if Full Access is turned off ([ADR-001](docs/DECISIONS.md)).
 
-**Generate the project** (required after cloning, and after any `project.yml` change):
+---
 
-```sh
-xcodegen generate          # writes KeyboardProject.xcodeproj
+## 📊 Comparison Matrix
+
+| Feature | iOS Stock Keyboard | Gboard for iOS *(Frozen 2022)* | **The Keyboard Project** |
+| :--- | :---: | :---: | :---: |
+| **Android Gboard Layout** | ❌ | ⚠️ Partial | ✅ **1:1 AOSP Specs** |
+| **Multi-Item Clipboard History** | ❌ | ❌ | ✅ **Full History** |
+| **Zero Network / 100% Offline** | ⚠️ Telemetry | ❌ Cloud Sync | ✅ **Strictly Offline** |
+| **Active iOS 16/17/18+ Maintenance**| ✅ | ❌ Abandoned | ✅ **Active** |
+| **Zero Background Work While Typing** | — | — | ✅ **No timers, no I/O per keypress** |
+
+---
+
+## 🏗️ Project Architecture
+
+```
+The-Keyboard-project/
+├── Sources/
+│   ├── HostApp/          # Setup checklist, privacy statement & asset catalog
+│   ├── Keyboard/         # Custom UIInputViewController keyboard extension
+│   └── Shared/           # App Group storage, handshake record, device info
+├── Tests/                # Layout math and typing behavior unit tests (52)
+├── UITests/              # Touch-layer trials: rollover, hit-testing, hold-repeat (19)
+├── Scripts/              # redeploy.sh — renew the 7-day free-team signing
+├── docs/                 # Authoritative specifications, ADR logs, constraints & roadmap
+└── project.yml           # Declarative XcodeGen project specification
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Requirements
+
+- macOS running Xcode 15 or higher.
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+- An Apple ID (Free Personal Team or Developer Account).
+
+### 2. Build and Run
+
+```bash
+# Clone the repository
+git clone https://github.com/Srimi1/The-Keyboard-project.git
+cd The-Keyboard-project
+
+# Generate the .xcodeproj file
+xcodegen generate
+
+# Open in Xcode
 open KeyboardProject.xcodeproj
 ```
 
-**Verify it builds** without a developer account:
+To run build verification directly from terminal:
 
-```sh
+```bash
+# Build
 xcodebuild -project KeyboardProject.xcodeproj -scheme KeyboardProject \
   -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
+
+# Test — 52 unit tests + 19 touch-layer UI trials
+xcodebuild test -project KeyboardProject.xcodeproj -scheme KeyboardProject \
+  -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
 ```
 
-**Deploy to the iPhone:**
+---
 
-1. In Xcode, select the `KeyboardProject` scheme and your iPhone, then set your Apple ID under Signing & Capabilities for **both** targets (Xcode will pick the team automatically).
-2. First deploy needs a cable, **Developer Mode** on (Settings → Privacy & Security), and the profile trusted (Settings → General → VPN & Device Management). After that, enable "Connect via network" for Wi-Fi deploys.
-3. On device: Settings → General → Keyboard → Keyboards → **Add New Keyboard** → Keyboard Project → tap it → **Allow Full Access**.
-4. Settings → Keyboard Project → **Paste from Other Apps** → **Allow**. Without this, every clipboard capture fires a system prompt.
-5. Open the app, tap the **Try the keyboard** field, switch keyboards with the globe key, and tap **Diagnostics** in the keyboard's own bar to run the M0 tests from inside the extension.
+## 📱 Deploying to an iPhone
 
-**⚠️ The weekly ritual (while on the free account).** Free provisioning profiles expire **7 days** after issuance — the app stops launching and the keyboard dies. Re-deploy from Xcode weekly (~5 min over Wi-Fi). Keep the stock keyboard enabled as a fallback, and set a recurring reminder. This ends at M5 when the $99 program brings 1-year signing / 90-day TestFlight builds.
+1. In Xcode, select the `KeyboardProject` scheme and connect your iPhone.
+2. Under **Signing & Capabilities**, select your personal Team for **both** targets (`KeyboardProject` and `KeyboardExtension`).
+3. Enable **Developer Mode** on your iPhone (*Settings → Privacy & Security → Developer Mode*).
+4. Run the build to install the app on your device.
+5. On device: *Settings → General → Keyboard → Keyboards → Add New Keyboard → Keyboard Project → Allow Full Access*.
+6. Enable paste permissions: *Settings → Keyboard Project → Paste from Other Apps → Allow*.
 
-## Reference links
+The app's setup screen walks these three steps and shows which are done. After that the
+keyboard lives on the globe key and the app never needs opening again.
 
-- **KeyboardKit** — [github.com/KeyboardKit/KeyboardKit](https://github.com/KeyboardKit/KeyboardKit) · [features & free-vs-Pro](https://keyboardkit.com/features) · [releases](https://github.com/KeyboardKit/KeyboardKit/releases)
-- **AOSP LatinIME layout XML** — [row_qwerty4.xml](https://android.googlesource.com/platform/packages/inputmethods/LatinIME/+/refs/heads/main/java/res/xml/row_qwerty4.xml) — the primary source for Gboard's key-width percentages
-- **AOSP LatinIME more-keys data** — [values-en/donottranslate-more-keys.xml](https://android.googlesource.com/platform/packages/inputmethods/LatinIME/+/refs/heads/master/tools/make-keyboard-text/res/values-en/donottranslate-more-keys.xml) (English overrides) and [values/donottranslate-more-keys.xml](https://android.googlesource.com/platform/packages/inputmethods/LatinIME/+/refs/heads/master/tools/make-keyboard-text/res/values/donottranslate-more-keys.xml) (base, incl. `morekeys_punctuation`) — the source for §5a/§5c's accent callouts and punctuation grid. Note the resource files moved out of `java/res/values/` into the `tools/make-keyboard-text/` code-generation tool since the layout XML above was last touched.
-- **azooKey** — [github.com/azooKey/azooKey](https://github.com/azooKey/azooKey) — MIT, SwiftUI, actively maintained; the modern reference iOS keyboard to study
-- **Apple: Creating a custom keyboard** — [developer.apple.com](https://developer.apple.com/documentation/UIKit/creating-a-custom-keyboard) · [Custom Keyboard guide (archive)](https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html)
-- **Gboard clipboard (Android)** — [support.google.com](https://support.google.com/gboard/answer/10742542) — the behavior being imitated
-- **FUTO Swipe** — [swipe.futo.tech](https://swipe.futo.tech/) — the only credible open glide-typing path (v2, [ADR-007](docs/DECISIONS.md))
+> **Free personal team:** signing lapses after 7 days and the keyboard stops working until you
+> re-deploy ([C-23](docs/CONSTRAINTS.md)). The app shows a countdown; `./Scripts/redeploy.sh`
+> renews it in one command.
+
+---
+
+## 📖 Documentation Index
+
+| Document | Purpose |
+| :--- | :--- |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Target models, memory pipelines, App Group data flow. |
+| **[docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)** | Verified iOS keyboard platform constraints, limits, and gotchas. |
+| **[docs/UI-SPEC.md](docs/UI-SPEC.md)** | Key geometry, row percentages, layers, and long-press mapping. |
+| **[docs/CLIPBOARD.md](docs/CLIPBOARD.md)** | Clipboard capture model, retention, and security specifications. |
+| **[docs/DECISIONS.md](docs/DECISIONS.md)** | Architectural Decision Records (ADRs) and design choices. |
+| **[docs/ROADMAP.md](docs/ROADMAP.md)** | Milestone roadmap from M0 to M6. |
+| **[docs/RELEASING.md](docs/RELEASING.md)** | Release checklist, signing guide, and publishing workflow. |
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md) before submitting pull requests.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

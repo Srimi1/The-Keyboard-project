@@ -1,21 +1,33 @@
 import Foundation
 import SwiftUI
 
-/// Host-app side of the M0 tests.
+/// Host-app state behind the setup checklist.
 ///
-/// The host app cannot answer the interesting questions itself — Full Access and pasteboard
-/// behavior only mean something in the extension process. What it *can* prove is the other
-/// half of Test 1: that a report the keyboard wrote crosses the App Group boundary and
-/// arrives here (Q-01).
+/// The host app cannot answer any of the interesting questions itself — Full Access and
+/// pasteboard behavior only mean something in the extension process (C-06). What it reads is
+/// the handshake the keyboard leaves in the App Group: proof the keyboard ran, and the one
+/// fact only the extension can see.
+///
+/// The M0 diagnostics round trip is still here, but Debug-only — in a shipping build the app
+/// has no reason to write probe files every time it foregrounds.
 @MainActor
 final class HostDiagnostics: ObservableObject {
 
+    @Published private(set) var handshake: KeyboardHandshake?
+    @Published private(set) var signingDaysRemaining: Int?
+    @Published private(set) var lastRefresh: Date?
+
+    #if DEBUG
     @Published private(set) var appGroupAvailability: AppGroup.Availability?
     @Published private(set) var keyboardReport: DiagnosticsReport?
     @Published private(set) var ownReportSaved: Bool?
-    @Published private(set) var lastRefresh: Date?
+    #endif
 
     func refresh() {
+        handshake = KeyboardHandshakeStore.load()
+        signingDaysRemaining = ProvisioningProfile.daysRemaining()
+
+        #if DEBUG
         let availability = AppGroup.probeAvailability()
         appGroupAvailability = availability
         keyboardReport = DiagnosticsStore.load(.keyboard)
@@ -32,13 +44,16 @@ final class HostDiagnostics: ObservableObject {
             physFootprintMB: MemoryReporter.physFootprintMB()
         )
         ownReportSaved = DiagnosticsStore.save(report)
+        #endif
+
         lastRefresh = Date()
     }
 
     // MARK: - Onboarding status
     //
     // Derived from what the keyboard reported rather than from any private API. If the
-    // keyboard has never run, we simply do not know — which is itself accurate.
+    // keyboard has never run, we simply do not know — which is itself accurate, and is why
+    // every step distinguishes "unknown" from "failed".
 
     enum StepStatus {
         case unknown
@@ -64,18 +79,23 @@ final class HostDiagnostics: ObservableObject {
 
     /// Step 1 — the keyboard has been added and has actually run at least once.
     var keyboardHasRun: StepStatus {
-        keyboardReport == nil ? .unknown : .done
+        handshake == nil ? .unknown : .done
     }
 
     /// Step 2 — Full Access, as reported by the extension itself (C-06).
     var fullAccessStatus: StepStatus {
-        guard let value = keyboardReport?.hasFullAccess else { return .unknown }
+        guard let value = handshake?.hasFullAccess else { return .unknown }
         return value ? .done : .failed
     }
 
-    /// Step 3 — no API exposes this setting, so it is inferred from the keyboard's timed read
-    /// cross-checked against the prompt-free `hasStrings` (Q-05).
+    /// Step 3 — no API exposes this setting.
+    ///
+    /// Deciding it needs a pasteboard **value** read, which is the one call that can fire the
+    /// system paste alert (C-14). A shipping build has no business making that call before
+    /// M3's capture pipeline needs the value anyway, so outside Debug this stays an
+    /// instruction rather than a verdict.
     var pasteWithoutPromptStatus: StepStatus {
+        #if DEBUG
         guard let probe = keyboardReport?.pasteboard else { return .unknown }
         switch probe.outcome {
         case .allowedSilently:
@@ -86,9 +106,17 @@ final class HostDiagnostics: ObservableObject {
         case .pasteboardEmpty, .notRun:
             return .unknown
         }
+        #else
+        return .unknown
+        #endif
     }
 
-    /// The keyboard's own reading of what the outcome was, for display.
+    /// When the keyboard last reported in. Absent is not a failure: App Group writes from the
+    /// extension are unreliable without Full Access (C-12).
+    var keyboardLastSeen: Date? { handshake?.lastSeenAt }
+
+    #if DEBUG
+    /// The keyboard's own reading of the pasteboard outcome, for display.
     var pasteboardOutcome: String? {
         keyboardReport?.pasteboard.map(\.outcome.rawValue)
     }
@@ -105,4 +133,5 @@ final class HostDiagnostics: ObservableObject {
     /// working or not — is evidence about this code, not about the developer account.
     /// Without this guard a green simulator run would look like a closed question.
     var verdictIsConclusive: Bool { !DeviceInfo.isSimulator }
+    #endif
 }

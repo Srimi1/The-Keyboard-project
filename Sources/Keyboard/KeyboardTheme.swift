@@ -53,5 +53,12 @@ struct KeyboardTheme {
     /// Total keyboard height. 📐 MEASURE — UI-SPEC.md V-11 measures Gboard's height as a
     /// fraction of screen height; this is a working value until then (C-22).
     static let keyRowHeight: CGFloat = 46
-    static let diagnosticsBarHeight: CGFloat = 28
+
+    /// Height of the strip above the keys.
+    ///
+    /// M4 fills it with the suggestion bar and idle toolbar (UI-SPEC.md §7); until then it is
+    /// reserved, not removed. Keeping the space means Debug and Release keyboards are the same
+    /// shape, and that the geometry measured now is the geometry M4 lands into.
+    /// 📐 MEASURE — UI-SPEC.md V-09.
+    static let stripHeight: CGFloat = 28
 }

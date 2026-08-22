@@ -81,6 +81,27 @@ File-backed in the App Group container, **memory-mappable** — the store must b
 
 Settings are written by the host app and read by the extension. Because extension writes are unreliable without Full Access (C-12), settings are **mirrored** in both the shared container and the extension's local defaults, with **timestamp-based conflict resolution**: each key carries a last-written timestamp; the newer value wins on read. This is what production keyboards do, and it's the reason a settings change made in the host app appears in the keyboard even when the extension can't write back.
 
+### Keyboard handshake
+
+The one thing the extension writes to the App Group in a **shipping** build: `lastSeenAt`,
+`hasFullAccess`, `appVersion` (`Sources/Shared/KeyboardHandshake.swift`). The host app's setup
+checklist needs two facts it cannot observe for itself — whether the keyboard has ever run, and
+whether Full Access is on, which only the extension can read (C-06) and which has no
+notification or KVO path (C-41).
+
+Written from `viewWillAppear` **off the main thread**, and only when the payload changed or the
+stored record has gone stale (6 h). Appearing is on the critical path of the keyboard showing
+up, so nothing there waits on storage.
+
+Best-effort by design: extension writes are unreliable without Full Access (C-12), so a missing
+record means *"don't know"*, never *"broken"* — the checklist renders `.unknown` rather than a
+false negative.
+
+> The M0 harness (`DiagnosticsRunner`, `DiagnosticsPanel`, `DiagnosticsStore` reports) is a
+> **development tool** and compiles out of Release. It probed the container, the pasteboard and
+> memory on *every* keyboard appearance; that is far too expensive for a keyboard people type
+> on. In Debug it still runs and still writes full `DiagnosticsReport`s.
+
 ### Personal dictionary
 
 Words accepted by the user learn into the App Group store (ADR-009). Written from the extension when Full Access allows; otherwise queued in local defaults and reconciled the next time the host app runs.
@@ -149,7 +170,7 @@ Thresholds are **conservative by design** (ADR-009): under-correcting is an anno
 
 ## 8. Feedback subsystem
 
-`UIImpactFeedbackGenerator` for haptics, `AudioServicesPlaySystemSound` for clicks (not `AVAudioPlayer` — wrong audio bus in extensions, C-08). Both sit behind a single feature gate on `hasFullAccess` and **degrade silently** — the APIs already no-op without Full Access (C-07), so the gate exists to avoid pointless work, not to prevent errors.
+`UIImpactFeedbackGenerator` for haptics, `UIDevice.current.playInputClick()` for clicks (not `AVAudioPlayer` — wrong audio bus in extensions, C-08), paired with a `UIInputViewAudioFeedback` conformance on the `UIInputView` itself, not the controller (C-50). Both sit behind a single feature gate on `hasFullAccess`: the APIs no-op without Full Access (C-07), and `playInputClick` without Full Access has also been reported to hang rather than fail silently (C-51) — so the gate is mandatory to keep typing responsive (C-09), not just hygiene to avoid pointless work.
 
 ## 9. Degradation matrix
 
@@ -181,7 +202,10 @@ Rules:
 
 The host app exists to do what the extension can't, and App Review would require it to have real functionality anyway if this were ever published (C-30).
 
-- **Onboarding state machine**, with live status detection at each step: *keyboard added* → *Full Access enabled* → *"Paste from Other Apps" = Allow*. Because a re-signing cycle on the free account can reset toggles (C-23, ADR-004), this screen is also the diagnostic — a lost toggle is visible in seconds instead of surfacing as "the clipboard mysteriously stopped working."
+- **Onboarding state machine**, with live status detection at each step: *keyboard added* → *Full Access enabled* → *"Paste from Other Apps" = Allow*. Steps 1 and 2 read the handshake (§4); step 3 cannot be decided without a pasteboard **value** read, the one call that can prompt (C-14), so outside Debug it stays an instruction rather than a verdict until M3's capture pipeline needs the value anyway. Because a re-signing cycle on the free account can reset toggles (C-23, ADR-004), this screen is also the diagnostic — a lost toggle is visible in seconds instead of surfacing as "the clipboard mysteriously stopped working."
+  - This is the app's **primary screen**, not a section of a dashboard. Once the checklist is green the keyboard is reached from the globe key and the app has no further routine role. Everything that serves development — the M0 verdicts, the keyboard's report, memory readings, the keyboard preview — is in a `#if DEBUG` Developer section.
+  - **"Open Settings"** uses `UIApplication.openSettingsURLString`, which lands on *this app's own* Settings page: Full Access and "Paste from Other Apps" are there, but the Keyboards list is not reachable by any public deep link, so step 1 is given in words (C-55). Settings is also the only app a keyboard product may launch at all (C-30, 4.4.1).
+  - **Signing countdown** — days until the provisioning profile lapses, read from `embedded.mobileprovision` (Q-11). On a free personal team that is a 7-day clock and its expiry is indistinguishable, from the phone, from the keyboard simply breaking (C-23).
 - **Settings** — writes to the shared container (§4).
 - **Clipboard history viewer/manager** — the full-size counterpart to the keyboard panel: browse, pin, delete.
 - **Foreground capture** — the host app is one of the three capture triggers (§5).
