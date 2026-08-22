@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # project.yml sets SWIFT_APPROACHABLE_CONCURRENCY and SWIFT_DEFAULT_ACTOR_ISOLATION,
       # and Sources/ applies `nonisolated` to type declarations — all Xcode 16+ / Swift 6.
