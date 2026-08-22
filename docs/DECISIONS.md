@@ -55,7 +55,7 @@ Decisive finding: **none of this project's differentiators are Pro-gated.** The 
 
 ## ADR-004 — Start on the free personal team; buy the $99 program at daily-driver stage
 
-**Date:** 2026-08-21 · **Status:** Accepted
+**Date:** 2026-08-21 · **Status:** Superseded by ADR-010 (distribution target changed from personal-only to public App Store; the free-team-until-M5 provisioning plan itself is unchanged)
 
 **Context.** Everything this project needs works on free provisioning: the keyboard extension point needs no paid entitlement (C-24), Full Access is an Info.plist key plus a user toggle rather than a provisioned entitlement (C-06), and App Groups is listed as free-team-supported (C-25). The free tier's cost is friction: 7-day profile expiry, 3 apps, 10 App IDs of which host + extension consume 2 (C-23).
 
@@ -122,6 +122,47 @@ Decisive finding: **none of this project's differentiators are Pro-gated.** The 
 **Decision.** v1 autocorrect = `UITextChecker` + `UILexicon` + a bundled, memory-mapped word-frequency dictionary for ranking, with **conservative correction thresholds** — correct only on high confidence. The literal typed string is **always** a reachable candidate; **backspace immediately after a correction reverts it**. Accepted words learn into a personal dictionary in the App Group store. Next-word prediction waits until correction itself feels safe.
 
 **Consequences.** "Good enough, not Gboard-equal" is a stated product truth in [PRODUCT.md](PRODUCT.md), not a defect to be fixed by a future session inventing an API that doesn't exist. Tuning happens against the owner's real typing over M4, with a misfire log driving threshold changes. Under-correcting is the intended failure direction: a missed correction is an annoyance, a wrong correction that destroys a word is why people uninstall keyboards.
+
+---
+
+## ADR-010 — Distribution target is the public App Store, not personal sideload only
+
+**Date:** 2026-08-21 · **Status:** Accepted
+
+**Context.** ADR-004 and [PRODUCT.md](PRODUCT.md) §6 fixed distribution as "personal sideload / TestFlight only," with App Store submission listed as a rejected non-goal — App Review guidelines were recorded in C-30 purely as a hedge, "so a future decision isn't made blind." That future decision has now been made: the owner wants this shipped on the App Store, matching Apple's security/privacy/review standards, not just running on one personal device. Two things this reverses concretely: (1) every App-Review-only requirement in C-30 (4.4, 4.4.1, 5.1.1, 5.1.2) moves from "recorded for later" to "must actually be satisfied before submission," and (2) a **Privacy Manifest (`PrivacyInfo.xcprivacy`) is now mandatory** — Apple has required one since May 1, 2024 for any app using a "required-reason API," and this project's heavy `UserDefaults`/App Group usage (C-12) and file-timestamp reads squarely qualify (new fact **C-31**). Neither target currently ships a `PrivacyInfo.xcprivacy` file (verified by repo search, 2026-08-21) — this is a real gap, not a hypothetical one, tracked as an M5 exit item below.
+
+What this decision does **not** change: the architecture stays single-tenant — no accounts, no sign-in, no server, no cross-device sync (that non-goal in PRODUCT.md §6 is about the app never having a backend, which is orthogonal to how many individual people install their own private copy from the store). The no-network rule (ADR-005) is untouched and becomes *more* load-bearing, since it's also what keeps the app clean against 4.4.1/5.1.2. English-only (ADR-002) is untouched — that's a v1 scope decision, not a distribution one. ADR-004's actual provisioning mechanics (stay on the free personal team through M2–M4, buy the $99/yr Apple Developer Program at M5) are **also unchanged in timing** — a paid Program membership is required for *any* distribution method including TestFlight, so the existing M5 upgrade point already sits before the point it would first be needed. What changes is only the destination after that upgrade: App Store Connect submission for public release, not a permanent personal TestFlight/ad-hoc install.
+
+**Decision.** Target **public App Store release** once v1 (through M5) is complete and passes an App-Store-readiness check. Concretely, before any submission:
+- Ship a correct `PrivacyInfo.xcprivacy` in both targets declaring the required-reason API categories actually used (C-31) and `NSPrivacyCollectedDataTypes` accurately reflecting that **zero data leaves the device** — no tracking domains, no collected data types tied to the user's identity.
+- Satisfy C-30 (4.4 real host-app functionality — already true, the host app has onboarding/settings/diagnostics; 4.4.1 keyboard-specific rules — already true per ADR-005/ADR-009; 5.1.1 a reachable privacy-policy link in the host app and App Store Connect listing — not yet built; 5.1.2 — already true, nothing is collected to profile).
+- Buy the $99 Apple Developer Program at M5 as ADR-004 already planned, this time explicitly as the App Store Connect enrollment, not just a TestFlight/ad-hoc convenience.
+- Write App Store Connect metadata (description, screenshots, support URL, privacy-policy URL, age rating, export-compliance answer — this app does no encryption beyond what iOS provides by default).
+
+**Consequences.** PRODUCT.md §6's "App Store distribution — never" line is reversed; PRODUCT.md is updated in the same session to point here instead of restating the old non-goal. CONSTRAINTS.md C-30 is re-verified against current (2026-08-21) guideline text and its framing changed from "hypothetical" to "binding requirement"; new fact C-31 records the Privacy Manifest requirement. ROADMAP.md M5 gets explicit App-Store-readiness exit items (privacy manifest, privacy-policy URL, App Store Connect listing) alongside its existing daily-driver-hardening criteria — submission should not be attempted before M5's 14-day daily-driver bar is met regardless of technical review-readiness, since a keyboard that doesn't survive as a daily driver on the owner's own phone has no business being offered to anyone else's. This ADR does not itself claim the app is ready to submit — only that submission is now the intended endpoint, with the concrete gap list above still open.
+
+---
+
+## ADR-011 — Development instrumentation compiles out of Release; the extension writes one handshake instead
+
+**Date:** 2026-08-22 · **Status:** Accepted
+
+**Context.** The M0 harness was written to answer Q-01/Q-03/Q-05 from inside the extension process, which is the only place those answers mean anything. It was never gated, so it shipped: in a **Release** build, every `viewWillAppear` — that is, every time the keyboard appeared, in every host app — ran `AppGroup.probeAvailability()` (a UUID file write, read-back and delete in the shared container), a `UIPasteboard` `changeCount`/`hasStrings` probe, a JSON encode and a second write with a read-back verify, and started a **1 Hz `Timer`** that ran for as long as the keyboard was visible. That is disk I/O and IPC on the critical path of the keyboard appearing, against a ≤ 40 MB budget and an invariant that says the keyboard always types (C-09, C-10).
+
+It was also **dead work**. `KeyboardViewModel.diagnostics` is a plain `let`, and a nested `ObservableObject` does not forward `objectWillChange`, so the memory figure the timer computed never reached the strip that displayed it. The number on screen was frozen at its first value.
+
+Alternatives considered:
+- **Delete the diagnostics entirely.** Smallest tree, but ROADMAP requires an on-device `phys_footprint` reading at every milestone exit, and Instruments cannot easily attach to a keyboard extension running inside another app's process (that is *why* the keyboard reports its own footprint). Deleting the instrument would leave a required gate with no way to measure it.
+- **Leave the code compiled in and only stop the runtime work.** Fixes the CPU and disk cost but keeps ~450 lines of unreachable code in the shipped extension, and leaves the trap in place for the next person who calls into it.
+- **Gate the runtime work only in the extension, keep it in the host app.** The host app has no memory budget, but it was also probing the container on every foreground for no user-visible reason.
+
+**Decision.** `DiagnosticsRunner` and `DiagnosticsPanel` are wrapped in `#if DEBUG` at file level, `KeyboardViewModel.diagnostics` exists only in Debug, and every call site is gated. Debug builds keep the full harness — and the nested-observable bug is fixed there, so the readout actually updates.
+
+What the shipping extension writes instead is `KeyboardHandshake` (`Sources/Shared`): `lastSeenAt`, `hasFullAccess`, `appVersion`, written **off the main thread** and only when the payload changed or the stored record is older than 6 h. That is the minimum the host app's setup checklist needs, because whether Full Access is on is a fact only the extension can read (C-06) and has no notification path (C-41).
+
+The keyboard's strip keeps its **height** in Release but renders nothing. Collapsing it would make the shipping keyboard 28 pt shorter than the Debug build, than every geometry measurement taken so far, and than the space M4's suggestion bar will occupy (UI-SPEC §7).
+
+**Consequences.** The Release extension binary drops to ~901 KB with **zero** `DiagnosticsRunner`/`DiagnosticsPanel` symbols (verified with `nm`), and the whole app to 3.2 MB. Step 3 of onboarding ("Paste from Other Apps") can no longer be *confirmed* in Release, because confirming it requires a pasteboard value read — the one call that can prompt (C-14); it is presented as an instruction until M3's capture pipeline needs the value in the course of doing real work. `DiagnosticsReport`/`DiagnosticsStore` survive for the Debug panel and the host app's Developer section. Anyone adding instrumentation to the extension from here on must gate it the same way — an ungated probe in `viewWillAppear` is the specific mistake this ADR exists to prevent.
 
 ---
 

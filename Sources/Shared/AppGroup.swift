@@ -4,7 +4,12 @@ import Foundation
 ///
 /// Never write this string anywhere else — not in a plist read, not in a call site.
 /// Both targets compile this file, so both get the same value by construction.
-enum AppGroup {
+///
+/// `nonisolated` because none of this needs the main actor — it is pure static utility over
+/// the shared container, and the keyboard handshake reads it from a background queue. The
+/// project sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so without this the type would be
+/// main-actor-bound by default and off-main access would be an error in Swift 6 language mode.
+nonisolated enum AppGroup {
 
     static let identifier = "group.com.srijan.keyboardproject"
 

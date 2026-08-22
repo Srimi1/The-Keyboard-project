@@ -23,8 +23,12 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
-        // False on Face ID iPhones, where iOS draws globe and dictation below the
-        // keyboard — the key must not be drawn at all there (C-21).
+        // C-21 says this is false on Face ID iPhones, where iOS draws globe and dictation
+        // below the keyboard — so the key must not be drawn there. ⚠️ That fact is
+        // **unverified** (Q-10), and the failure mode if it is wrong is severe: no globe key
+        // and no system globe means the user is stranded on this keyboard, which is also a
+        // confirmed App Review rejection (C-30, 4.4.1). Debug builds surface the live value
+        // in the strip; read it on device before trusting this branch.
         model.needsGlobe = needsInputModeSwitchKey
 
         // Read here rather than in viewDidLoad: before the host connection exists the value
@@ -32,8 +36,16 @@ final class KeyboardViewController: UIInputViewController {
         model.feedback.hasFullAccess = hasFullAccess
         model.feedback.prepare()
 
+        // The one thing a shipping keyboard tells the host app: that it ran, and whether
+        // Full Access is on — the host app cannot read either for itself (C-06). Throttled
+        // and written off the main thread, so appearing stays free (see KeyboardHandshake).
+        KeyboardHandshakeStore.recordKeyboardSeen(hasFullAccess: hasFullAccess)
+
+        #if DEBUG
         model.diagnostics.startMemoryMonitor()
         model.diagnostics.runSafeProbes(hasFullAccess: hasFullAccess)
+        #endif
+
         model.syncWithTextField()
     }
 
@@ -58,7 +70,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        #if DEBUG
         model.diagnostics.stopMemoryMonitor()
+        #endif
     }
 
     deinit {
@@ -110,7 +124,7 @@ final class KeyboardViewController: UIInputViewController {
         let height = KeyboardMetrics.preferredKeyboardHeight(
             rowCount: model.rows.count,
             width: width,
-            stripHeight: KeyboardTheme.diagnosticsBarHeight
+            stripHeight: KeyboardTheme.stripHeight
         )
 
         if let heightConstraint {

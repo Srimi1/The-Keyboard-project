@@ -33,10 +33,14 @@ struct KeyboardPreviewView: View {
             // The host app's footprint, not the extension's — the number that counts against
             // the 40 MB budget is the one the keyboard reports when running inside another
             // app. This is here so the bar reads honestly rather than showing 0.0 MB.
+            #if DEBUG
             model.diagnostics.startMemoryMonitor()
+            #endif
         }
         .onDisappear {
+            #if DEBUG
             model.diagnostics.stopMemoryMonitor()
+            #endif
         }
     }
 
@@ -76,7 +80,7 @@ struct KeyboardPreviewView: View {
         KeyboardMetrics.preferredKeyboardHeight(
             rowCount: model.rows.count,
             width: UIScreen.main.bounds.width,
-            stripHeight: KeyboardTheme.diagnosticsBarHeight
+            stripHeight: KeyboardTheme.stripHeight
         )
     }
 

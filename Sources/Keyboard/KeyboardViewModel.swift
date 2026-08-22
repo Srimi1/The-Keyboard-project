@@ -29,12 +29,18 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var layer: KeyboardLayer = .base
     @Published private(set) var shiftState: ShiftState = .off
     @Published private(set) var pressedKeyIDs: Set<String> = []
-    @Published var showDiagnostics = false
     @Published var needsGlobe = false
     @Published var returnLabel = "return"
 
-    let diagnostics = DiagnosticsRunner()
     weak var handler: KeyboardActionHandler?
+
+    // The M0 harness is a development tool, not a keyboard feature. Gating the property
+    // rather than no-op'ing the calls is what actually keeps `DiagnosticsRunner` and its
+    // 1 Hz timer out of the shipping binary.
+    #if DEBUG
+    @Published var showDiagnostics = false
+    let diagnostics = DiagnosticsRunner()
+    #endif
 
     /// The accent / punctuation callout currently open, if any.
     @Published private(set) var callout: CalloutState?
@@ -398,10 +404,14 @@ final class KeyboardViewModel: ObservableObject {
             break   // handled by NextKeyboardButton — needs UIKit target-action (C-47)
 
         case .diagnostics:
+            // The key exists in `KeyAction` so the switch stays exhaustive; nothing can
+            // reach it in Release, where the button that sends it is compiled out.
+            #if DEBUG
             showDiagnostics.toggle()
             if showDiagnostics {
                 diagnostics.runSafeProbes(hasFullAccess: handler.hasFullAccess)
             }
+            #endif
         }
     }
 

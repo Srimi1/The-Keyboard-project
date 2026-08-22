@@ -126,6 +126,13 @@ This is a v1 requirement — it's how Gboard users type numbers without a number
 
 ## 7. Suggestion strip & toolbar
 
+> **Status (2026-08-22):** the strip exists as **reserved space and renders nothing** until M4
+> builds the two states below. It is not collapsed to zero on purpose — the keyboard's total
+> height is derived from it (`KeyboardMetrics.preferredKeyboardHeight`), so removing it would
+> change every key proportion measured so far and would have to be undone at M4. Debug builds
+> use the same band for the development readout. Its height (`KeyboardTheme.stripHeight`, 28 pt)
+> is a working value, not a measured one — see V-09.
+
 The strip above the keys has **two states**:
 
 **Typing state — 3 candidate slots**
@@ -192,7 +199,7 @@ The clipboard button replaces the **key area** (not the whole keyboard) with the
 | Backspace (each repeat) | light impact, possibly suppressed during fast repeat | click, 📐 verify suppression |
 | Long-press callout open | selection change | none |
 
-Both haptics and sound **silently no-op without Full Access** (C-07, C-08) — feature-gate on `hasFullAccess`, degrade silently, never error. Use `AudioServicesPlaySystemSound`, not `AVAudioPlayer` (wrong audio bus in extensions, C-08).
+Both haptics and sound **no-op without Full Access** (C-07, C-08) — feature-gate on `hasFullAccess`. Use `UIDevice.current.playInputClick()`, not `AVAudioPlayer` (wrong audio bus in extensions, C-08), paired with a `UIInputViewAudioFeedback` conformance on the `UIInputView` itself, not the controller (C-50). Without Full Access, `playInputClick` has also been reported to hang rather than no-op silently (C-51) — the `hasFullAccess` gate is mandatory, not optional hygiene.
 
 ## 11. Keyboard height
 

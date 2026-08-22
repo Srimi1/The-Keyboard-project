@@ -1,3 +1,10 @@
+// Development-only. The M0/M1 empirical harness — a 1 Hz memory timer plus a probe suite
+// that wrote to the shared container on every keyboard appearance. Useful at a Mac, far
+// too expensive to leave in a keyboard people type on, so the whole file compiles out of
+// Release. What ships instead is `KeyboardHandshake` (Sources/Shared): one throttled
+// record, written off the main thread.
+#if DEBUG
+
 import Foundation
 import SwiftUI
 import UIKit
@@ -166,3 +173,5 @@ final class DiagnosticsRunner: ObservableObject {
         }
     }
 }
+
+#endif

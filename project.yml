@@ -21,6 +21,12 @@ settings:
     # it rather than discover it. Swift 5 mode makes isolation violations warnings instead
     # of hard errors; the two settings below give Swift 6's code shape now, so flipping
     # SWIFT_VERSION to "6.0" later is a one-line migration.
+    #
+    # Verified 2026-08-22: `xcodebuild ... SWIFT_VERSION=6.0` builds both targets with zero
+    # errors and zero warnings from our own sources. Re-check it after touching anything that
+    # crosses an actor boundary — `Sources/Shared` compiles into both targets and is reached
+    # from a background queue by the keyboard handshake, which is exactly where this breaks
+    # first (both `AppGroup` and `KeyboardHandshake` are `nonisolated` for that reason).
     SWIFT_VERSION: "5.0"
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     # Xcode applies this only to `application` product types, which would leave the app
@@ -55,6 +61,7 @@ targets:
           - "KeyboardViewController.swift"
           - "Info.plist"
           - "Keyboard.entitlements"
+          - "PrivacyInfo.xcprivacy"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject
@@ -122,6 +129,36 @@ targets:
     dependencies:
       - target: KeyboardProject
 
+  # --------------------------------------------------------------- UI tests
+  # The unit tests above can only reach the rules; they cannot reach the *touch layer*.
+  # Keys are not buttons — they are drawn rects with a raw UIKit `MultiTouchView` on top
+  # (TouchTracker.swift), so hit-testing, rollover, press-vs-release semantics and
+  # hold-to-repeat only exist once a real finger lands on a real coordinate. The only way
+  # to exercise that is to drive actual touches, which is what XCUITest does.
+  #
+  # It drives the host app, not the extension: the host app compiles Sources/Keyboard in
+  # and renders the same KeyboardRootView (see the host app target above), so these tests
+  # hit the real keyboard code. What they cannot see is anything the extension process
+  # owns — the text document proxy, real Full Access, haptics, the globe key, and the
+  # memory budget. Those stay device-only, per the milestone exit criteria.
+  #
+  # There are no accessibility identifiers in Sources/ and none should be added for the
+  # tests' benefit: tests tap by coordinate, derived from the same percentage layout
+  # KeyboardMetrics uses.
+  KeyboardProjectUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.srijan.keyboardproject.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ""
+    dependencies:
+      - target: KeyboardProject
+
 schemes:
   KeyboardProject:
     build:
@@ -129,11 +166,13 @@ schemes:
         KeyboardProject: all
         KeyboardExtension: all
         KeyboardProjectTests: [test]
+        KeyboardProjectUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - KeyboardProjectTests
+        - KeyboardProjectUITests
     archive:
       config: Release

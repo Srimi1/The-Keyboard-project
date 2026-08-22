@@ -1,52 +1,95 @@
 import SwiftUI
+import UIKit
 
+/// The host app is a **setup screen**, not a dashboard.
+///
+/// Once the three steps below are done the keyboard lives on the globe key and this app never
+/// needs opening again. Everything that exists to serve development — the M0 verdicts, the
+/// keyboard's own report, memory readings — is Debug-only and sits at the bottom.
 struct RootView: View {
     @StateObject private var diagnostics = HostDiagnostics()
     @Environment(\.scenePhase) private var scenePhase
     @State private var scratchText = ""
-    @FocusState private var scratchFocused: Bool
 
     var body: some View {
         NavigationStack {
             List {
-                milestoneSection
-                previewSection
-                tryItSection
                 setupSection
-                verdictSection
-                keyboardReportSection
+                #if DEBUG
+                previewSection
+                #endif
+                signingSection
+                tryItSection
+                privacySection
                 aboutSection
+                #if DEBUG
+                developerSection
+                #endif
             }
             .navigationTitle("Keyboard Project")
-            .toolbar {
-                Button("Refresh") { diagnostics.refresh() }
-            }
         }
         .onAppear { diagnostics.refresh() }
         // Explicit `perform:` selects the single-value overload; the zero- and
         // two-parameter forms of onChange are iOS 17+.
         .onChange(of: scenePhase, perform: { phase in
-            // The host app entering the foreground is one of the three clipboard capture
-            // triggers (ARCHITECTURE.md §5); for now it just refreshes diagnostics.
+            // Coming back from Settings is the moment a step most often flips to done, so
+            // this is what makes the checklist feel live. It is also one of the three
+            // clipboard capture triggers once M3 lands (ARCHITECTURE.md §5).
             if phase == .active { diagnostics.refresh() }
         })
     }
 
-    // MARK: - Sections
+    // MARK: - Setup — the reason this app exists
 
-    private var milestoneSection: some View {
+    private var setupSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("M0 — Foundations & feasibility spike")
-                    .font(.headline)
-                Text("Prove the extension loads, App Groups provisions, and the pasteboard behaves — before writing product code.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            step(
+                number: 1,
+                title: "Add the keyboard",
+                detail: "Settings → General → Keyboard → Keyboards → Add New Keyboard → Keyboard Project",
+                status: diagnostics.keyboardHasRun,
+                doneNote: "Added, and the keyboard has run at least once.",
+                pendingNote: nil
+            )
+            step(
+                number: 2,
+                title: "Allow Full Access",
+                detail: "Settings → General → Keyboard → Keyboards → Keyboard Project → Allow Full Access. Needed for the clipboard, haptics and key sound.",
+                status: diagnostics.fullAccessStatus,
+                doneNote: "Reported enabled by the keyboard itself.",
+                pendingNote: nil
+            )
+            step(
+                number: 3,
+                title: "Paste from Other Apps → Allow",
+                detail: "Settings → Keyboard Project → Paste from Other Apps → Allow. Without it every clipboard capture fires a system prompt.",
+                status: diagnostics.pasteWithoutPromptStatus,
+                doneNote: "The keyboard's pasteboard read returned without a prompt.",
+                // Confirming this needs a pasteboard value read, which is the call that can
+                // prompt (C-14) — so it is not checked until the clipboard actually uses it.
+                pendingNote: "Set this now; it is confirmed once the clipboard starts using it."
+            )
+
+            Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
+                Label("Open this app's Settings page", systemImage: "gear")
             }
-            .padding(.vertical, 4)
+        } header: {
+            Text("Setup")
+        } footer: {
+            // Honest about the limit: there is no public deep link to the Keyboards list, and
+            // launching Settings is the only app a keyboard may open at all (C-30, 4.4.1).
+            Text("The button opens this app's own Settings page, where Full Access and Paste from Other Apps live. Step 1 is on the Keyboards screen and has to be reached by hand.\n\nAfter setup, switch to the keyboard with the globe key — you never need to open this app again.")
         }
     }
 
+    // MARK: - Keyboard preview (Debug only)
+    //
+    // A development tool: it renders the real `KeyboardRootView` inside the app so it can be
+    // compared side by side against the Gboard reference screenshots (the M1/M2 exit
+    // criteria) without switching keyboards. It is also what the XCUITest suite drives —
+    // keeping it high in the list is what keeps those coordinate taps reachable.
+
+    #if DEBUG
     private var previewSection: some View {
         Section {
             NavigationLink {
@@ -55,17 +98,45 @@ struct RootView: View {
                 Label("Keyboard preview", systemImage: "keyboard")
             }
         } footer: {
-            Text("Renders the real keyboard inside this app — for comparing against Gboard reference screenshots without switching keyboards.")
+            Text("Renders the real keyboard inside this app, for side-by-side comparison against the Gboard reference screenshots. Debug builds only.")
+        }
+    }
+    #endif
+
+    // MARK: - Signing expiry (C-23)
+
+    @ViewBuilder
+    private var signingSection: some View {
+        if let days = diagnostics.signingDaysRemaining {
+            Section {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: days <= 2 ? "exclamationmark.triangle.fill" : "clock")
+                        .foregroundStyle(days <= 2 ? .orange : .secondary)
+                        .font(.title3)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(days < 0
+                             ? "Signing expired \(-days) day\(-days == 1 ? "" : "s") ago"
+                             : "Signing expires in \(days) day\(days == 1 ? "" : "s")")
+                            .font(.subheadline.weight(.semibold))
+                        Text("A free personal team signs builds for 7 days (C-23). When it lapses the keyboard stops working until the app is re-deployed from Xcode — run Scripts/redeploy.sh. The paid program raises this to a year.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text("Signing")
+            }
         }
     }
 
-    /// The M0 exit criterion is literally "type hello into a text field from your own
-    /// keyboard" — this is that field, so the test does not depend on Notes or Safari.
+    // MARK: - Try it
+
     private var tryItSection: some View {
         Section {
-            TextField("Tap here, switch to Keyboard Project, and type", text: $scratchText, axis: .vertical)
+            TextField("Tap here, switch keyboards with the globe key, and type", text: $scratchText, axis: .vertical)
                 .lineLimit(1...4)
-                .focused($scratchFocused)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
 
@@ -81,41 +152,48 @@ struct RootView: View {
             }
         } header: {
             Text("Try the keyboard")
-        } footer: {
-            Text("Switch keyboards with the globe key. Tap Diagnostics in the keyboard's own bar to run the M0 tests from inside the extension.")
         }
     }
 
-    private var setupSection: some View {
-        Section("Setup") {
-            step(
-                number: 1,
-                title: "Add the keyboard",
-                detail: "Settings → General → Keyboard → Keyboards → Add New Keyboard → Keyboard Project",
-                status: diagnostics.keyboardHasRun,
-                doneNote: "The keyboard has run and reported back."
-            )
-            step(
-                number: 2,
-                title: "Allow Full Access",
-                detail: "Same screen → tap Keyboard Project → Allow Full Access. Required for the clipboard, haptics and sound.",
-                status: diagnostics.fullAccessStatus,
-                doneNote: "Reported enabled by the extension."
-            )
-            step(
-                number: 3,
-                title: "Paste from Other Apps → Allow",
-                detail: "Settings → Keyboard Project → Paste from Other Apps → Allow. Without it, every clipboard capture fires a system prompt.",
-                status: diagnostics.pasteWithoutPromptStatus,
-                doneNote: "The keyboard's pasteboard read returned without a prompt."
-            )
+    // MARK: - Privacy
+    //
+    // Real, load-bearing content rather than filler: guideline 4.4 requires a host app that
+    // contains an extension to do something itself, and 5.1.1 requires the privacy position
+    // to be reachable in-app. A hosted policy URL is still owed before submission (C-30).
+
+    private var privacySection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Nothing you type leaves this phone", systemImage: "lock.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text("The keyboard has no network code at all — not for sync, not analytics, not crash reporting (ADR-005). There are no accounts and no servers. Clipboard history and settings are stored only in this app's shared container on this device, and are deleted when you delete the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 2)
+        } header: {
+            Text("Privacy")
         }
     }
 
-    private var verdictSection: some View {
+    // MARK: - About
+
+    private var aboutSection: some View {
+        Section("About") {
+            labeled("Version", "\(AppInfo.version) (\(AppInfo.build))")
+            if let seen = diagnostics.keyboardLastSeen {
+                labeled("Keyboard last used", seen.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+    }
+
+    // MARK: - Developer (Debug only)
+
+    #if DEBUG
+    private var developerSection: some View {
         Section {
             statusRow(
-                title: "App Groups round trip",
+                title: "App Groups round trip (Q-01)",
                 subtitle: diagnostics.appGroupAvailability?.summary ?? "not probed",
                 status: diagnostics.appGroupRoundTripStatus
             )
@@ -126,63 +204,46 @@ struct RootView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.blue)
-            } else if diagnostics.appGroupRoundTripStatus == .failed {
-                Label(
-                    "App Groups did not provision on this account. Per ADR-004, buy the $99 Apple Developer Program today — the clipboard architecture depends on it.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
             }
-        } header: {
-            Text("Test 1 — the decisive one (Q-01)")
-        } footer: {
-            Text("A report written by the keyboard extension and read here proves the shared container works across processes.")
-        }
-    }
 
-    @ViewBuilder
-    private var keyboardReportSection: some View {
-        if let report = diagnostics.keyboardReport {
-            Section("Last report from the keyboard") {
-                labeled("Recorded", report.recordedAt.formatted(date: .abbreviated, time: .standard))
+            if let report = diagnostics.keyboardReport {
+                labeled("Report recorded", report.recordedAt.formatted(date: .abbreviated, time: .standard))
                 labeled("Device", report.deviceModel)
                 labeled("OS", report.osVersion)
                 labeled("App Group", report.appGroupSummary)
-                labeled("Full Access", report.hasFullAccess.map { $0 ? "enabled" : "off" } ?? "unknown")
                 if let mb = report.physFootprintMB {
                     labeled("Keyboard memory", String(format: "%.1f MB / %.0f MB budget", mb, MemoryReporter.budgetMB))
                 }
-                if let probe = report.pasteboard {
-                    labeled("Pasteboard changeCount", "\(probe.changeCount)")
-                    labeled("Pasteboard hasStrings", probe.hasStrings ? "yes" : "no")
-                    if let ms = probe.readDurationMS {
-                        labeled("Value read took", String(format: "%.0f ms", ms))
-                    }
+                if let outcome = diagnostics.pasteboardOutcome {
+                    labeled("Pasteboard", outcome)
                 }
-            }
-        } else {
-            Section("Last report from the keyboard") {
-                Text("None yet. Open any app, switch to the Keyboard Project keyboard, and tap Diagnostics.")
+            } else {
+                Text("No keyboard report yet — switch to the keyboard and tap Diagnostics in its strip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        }
-    }
 
-    private var aboutSection: some View {
-        Section("About") {
             labeled("Host app memory", MemoryReporter.physFootprintMB().map { String(format: "%.1f MB", $0) } ?? "unknown")
             labeled("App Group", AppGroup.identifier)
-            if let last = diagnostics.lastRefresh {
-                labeled("Last refresh", last.formatted(date: .omitted, time: .standard))
-            }
+            Button("Refresh") { diagnostics.refresh() }
+        } header: {
+            Text("Developer")
+        } footer: {
+            Text("Debug builds only — compiled out of Release.")
         }
     }
+    #endif
 
     // MARK: - Building blocks
 
-    private func step(number: Int, title: String, detail: String, status: HostDiagnostics.StepStatus, doneNote: String) -> some View {
+    private func step(
+        number: Int,
+        title: String,
+        detail: String,
+        status: HostDiagnostics.StepStatus,
+        doneNote: String,
+        pendingNote: String?
+    ) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: status.symbol)
                 .foregroundStyle(status.tint)
@@ -194,6 +255,11 @@ struct RootView: View {
                 Text(status == .done ? doneNote : detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if status != .done, let pendingNote {
+                    Text(pendingNote)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.vertical, 2)
