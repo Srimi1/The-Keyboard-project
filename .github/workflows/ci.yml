@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # project.yml sets SWIFT_APPROACHABLE_CONCURRENCY and SWIFT_DEFAULT_ACTOR_ISOLATION,
+      # and Sources/ applies `nonisolated` to type declarations — all Xcode 16+ / Swift 6.
+      # Pinning an older Xcode here fails to compile instead of catching a real regression,
+      # and pinning a specific new one breaks whenever the runner image rolls forward.
+      - name: Select the newest installed Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $latest"
+          sudo xcode-select -switch "$latest"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Build host app and keyboard extension
+        run: |
+          xcodebuild build \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Pick whatever iPhone the runner actually has; pinning a model name breaks silently
+      # when the image updates.
+      - name: Pick a simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          for runtime in sorted(devices, reverse=True):
+              for d in devices[runtime]:
+                  if d['name'].startswith('iPhone'):
+                      print(d['udid']); raise SystemExit
+          raise SystemExit('no iPhone simulator available')
+          ")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid" || true
+
+      # Unit tests only, and they gate — no `|| true`.
+      #
+      # The 19 XCUITest touch trials in UITests/ are deliberately not run here. They drive
+      # synthesized multi-touch, and whether XCUITest delivers one touch or two is decided
+      # per app session (Q-13 in docs/CONSTRAINTS.md) — measured, not guessed. That makes
+      # them a poor CI gate: a red badge would report the harness, not the keyboard. Run
+      # them locally with `make test`.
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:KeyboardProjectTests \
+            CODE_SIGNING_ALLOWED=NO

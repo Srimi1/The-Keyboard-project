@@ -1,6 +1,6 @@
 # CLAUDE.md — Rules for AI working sessions
 
-**The Keyboard Project** — a personal-use iOS keyboard extension replicating the Android Gboard layout, feel, and clipboard manager on iPhone. English-only. Not for the App Store. One user, one phone.
+**The Keyboard Project** — an iOS keyboard extension replicating the Android Gboard layout, feel, and clipboard manager on iPhone. English-only. Built for the owner's own daily use first; **targeting eventual public App Store release** once v1 clears the App-Store-readiness checklist at M5 (ADR-010, supersedes ADR-004's personal-sideload-only scope). Architecturally single-tenant regardless of distribution: no accounts, no backend, no cross-device sync — every install is independent.
 
 This file is the contract for every session. Read it first.
 
