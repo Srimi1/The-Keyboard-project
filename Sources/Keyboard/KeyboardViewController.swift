@@ -23,12 +23,14 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
-        // C-21 says this is false on Face ID iPhones, where iOS draws globe and dictation
-        // below the keyboard — so the key must not be drawn there. ⚠️ That fact is
-        // **unverified** (Q-10), and the failure mode if it is wrong is severe: no globe key
-        // and no system globe means the user is stranded on this keyboard, which is also a
-        // confirmed App Review rejection (C-30, 4.4.1). Debug builds surface the live value
-        // in the strip; read it on device before trusting this branch.
+        // Measured true on iPhone 14 / iOS 26.5 in Notes, Messages and Safari (Q-10,
+        // 2026-08-22) — so the keyboard draws its own globe key there. C-21 used to claim
+        // this was false on Face ID iPhones; that clause was wrong and has been corrected.
+        //
+        // The conditional stays anyway: a next-keyboard method is mandatory (C-30, 4.4.1) and
+        // its absence is a confirmed rejection, so if this ever does return false the globe
+        // must still be reachable some other way rather than silently vanishing. Debug builds
+        // keep the live value in the strip for exactly that reason.
         model.needsGlobe = needsInputModeSwitchKey
 
         // Read here rather than in viewDidLoad: before the host connection exists the value

@@ -139,7 +139,7 @@ These are **not deferred — they are rejected.** Do not propose them.
 
 - **Any networked feature** — voice typing, translate, GIF search, Google search, sync, analytics, crash reporting. Full Access unlocks network; we never use it (ADR-005). This is the privacy stance and it is not negotiable.
 - **Multilingual support** — English only (ADR-002).
-- **App Store distribution** — personal sideload / TestFlight only (ADR-004). Guidelines are recorded in C-30 purely so a future decision isn't made blind.
+- ~~App Store distribution — personal sideload / TestFlight only~~ **Reversed by [ADR-010](DECISIONS.md#adr-010--distribution-target-is-the-public-app-store-not-personal-sideload-only):** public App Store release is now the target, once v1 passes an App-Store-readiness check at M5. C-30/C-31 in CONSTRAINTS.md are the binding requirements, not a hedge.
 - **Other users** — no accounts, no sharing, no multi-device. One person, one phone.
 - **Being a better Gboard** — the goal is *feeling like Gboard*, not improving on it. Ideas that are "better than Android" but break muscle memory lose by default.
 

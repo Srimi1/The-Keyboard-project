@@ -78,9 +78,12 @@ struct KeyRow: Identifiable, Equatable {
 enum KeyboardLayout {
 
     /// - Parameters:
-    ///   - needsGlobe: pass `UIInputViewController.needsInputModeSwitchKey`. It is false on
-    ///     Face ID iPhones, where iOS draws globe and dictation below the keyboard, so the key
-    ///     must not be drawn at all there (C-21).
+    ///   - needsGlobe: pass `UIInputViewController.needsInputModeSwitchKey`. Measured **true**
+    ///     on iPhone 14 / iOS 26.5 in Notes, Messages and Safari (Q-10, 2026-08-22) — so on a
+    ///     real iPhone the globe key *is* drawn and takes the comma's slot. C-21 previously
+    ///     claimed the opposite for Face ID iPhones; that clause was wrong and is corrected.
+    ///     The parameter stays because a device returning false must still be handled — a
+    ///     next-keyboard method is mandatory (C-30, 4.4.1).
     ///   - returnLabel: from the field's `returnKeyType` — "go", "search", "send" and so on.
     static func rows(
         layer: KeyboardLayer,
