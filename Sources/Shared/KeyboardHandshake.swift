@@ -34,7 +34,14 @@ nonisolated struct KeyboardHandshake: Codable, Equatable {
     /// forever.
     func isRedundant(against stored: KeyboardHandshake?, staleAfter: TimeInterval, now: Date) -> Bool {
         guard let stored, stored.payload == payload else { return false }
-        return now.timeIntervalSince(stored.lastSeenAt) < staleAfter
+
+        let age = now.timeIntervalSince(stored.lastSeenAt)
+        // A record dated in the future — the clock moved backwards, or the container came
+        // from a restored backup — would otherwise read as "fresh" forever and suppress
+        // every write after it. Treat it as stale so the next appearance corrects it.
+        guard age >= 0 else { return false }
+
+        return age < staleAfter
     }
 }
 

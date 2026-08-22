@@ -14,8 +14,20 @@ import SwiftUI
 final class HostDiagnostics: ObservableObject {
 
     @Published private(set) var handshake: KeyboardHandshake?
-    @Published private(set) var signingDaysRemaining: Int?
+    @Published private(set) var signing: SigningStatus?
     @Published private(set) var lastRefresh: Date?
+
+    /// Whether this build's signing is still valid, and for how much longer.
+    ///
+    /// `daysRemaining` alone cannot say this: a profile that lapsed four hours ago is still
+    /// "0 days", which would render as *expires in 0 days* on the one screen whose entire
+    /// job is to warn you before the keyboard dies (C-23).
+    struct SigningStatus: Equatable {
+        var expiry: Date
+        var isExpired: Bool
+        /// Whole days left, floored. Meaningful only while `isExpired` is false.
+        var daysRemaining: Int
+    }
 
     #if DEBUG
     @Published private(set) var appGroupAvailability: AppGroup.Availability?
@@ -25,7 +37,17 @@ final class HostDiagnostics: ObservableObject {
 
     func refresh() {
         handshake = KeyboardHandshakeStore.load()
-        signingDaysRemaining = ProvisioningProfile.daysRemaining()
+
+        if let expiry = ProvisioningProfile.expiryDate() {
+            let now = Date()
+            signing = SigningStatus(
+                expiry: expiry,
+                isExpired: expiry <= now,
+                daysRemaining: Calendar.current.dateComponents([.day], from: now, to: expiry).day ?? 0
+            )
+        } else {
+            signing = nil
+        }
 
         #if DEBUG
         let availability = AppGroup.probeAvailability()

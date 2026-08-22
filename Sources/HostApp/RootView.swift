@@ -70,8 +70,12 @@ struct RootView: View {
                 pendingNote: "Set this now; it is confirmed once the clipboard starts using it."
             )
 
-            Link(destination: URL(string: UIApplication.openSettingsURLString)!) {
-                Label("Open this app's Settings page", systemImage: "gear")
+            // Not force-unwrapped: `openSettingsURLString` is a system constant that has
+            // always parsed, but a crash on the setup screen is a poor trade for one `!`.
+            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                Link(destination: settingsURL) {
+                    Label("Open this app's Settings page", systemImage: "gear")
+                }
             }
         } header: {
             Text("Setup")
@@ -107,17 +111,16 @@ struct RootView: View {
 
     @ViewBuilder
     private var signingSection: some View {
-        if let days = diagnostics.signingDaysRemaining {
+        if let signing = diagnostics.signing {
+            let urgent = signing.isExpired || signing.daysRemaining <= 2
             Section {
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: days <= 2 ? "exclamationmark.triangle.fill" : "clock")
-                        .foregroundStyle(days <= 2 ? .orange : .secondary)
+                    Image(systemName: urgent ? "exclamationmark.triangle.fill" : "clock")
+                        .foregroundStyle(urgent ? (signing.isExpired ? .red : .orange) : .secondary)
                         .font(.title3)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(days < 0
-                             ? "Signing expired \(-days) day\(-days == 1 ? "" : "s") ago"
-                             : "Signing expires in \(days) day\(days == 1 ? "" : "s")")
+                        Text(signingHeadline(signing))
                             .font(.subheadline.weight(.semibold))
                         Text("A free personal team signs builds for 7 days (C-23). When it lapses the keyboard stops working until the app is re-deployed from Xcode — run Scripts/redeploy.sh. The paid program raises this to a year.")
                             .font(.caption)
@@ -263,6 +266,20 @@ struct RootView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Reads the lapsed case honestly. A profile that expired four hours ago is still
+    /// "0 days" by `dateComponents`, and rendering that as *expires in 0 days* would be
+    /// reassuring on exactly the screen that exists to warn you.
+    private func signingHeadline(_ signing: HostDiagnostics.SigningStatus) -> String {
+        guard !signing.isExpired else {
+            return "Signing has expired — the keyboard will not run until you re-deploy"
+        }
+        switch signing.daysRemaining {
+        case 0: return "Signing expires today"
+        case 1: return "Signing expires tomorrow"
+        case let days: return "Signing expires in \(days) days"
+        }
     }
 
     private func statusRow(title: String, subtitle: String, status: HostDiagnostics.StepStatus) -> some View {

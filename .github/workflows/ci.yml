@@ -46,18 +46,29 @@ jobs:
 
       # Pick whatever iPhone the runner actually has; pinning a model name breaks silently
       # when the image updates.
+      # Pick whatever iPhone the runner actually has; pinning a model name breaks silently
+      # when the image updates. Matches on "iPhone" anywhere in the name, because runner
+      # images and local machines both carry renamed devices.
       - name: Pick a simulator
         id: sim
         run: |
-          udid=$(xcrun simctl list devices available -j | python3 -c "
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
-          devices = json.load(sys.stdin)['devices']
-          for runtime in sorted(devices, reverse=True):
-              for d in devices[runtime]:
-                  if d['name'].startswith('iPhone'):
-                      print(d['udid']); raise SystemExit
-          raise SystemExit('no iPhone simulator available')
-          ")
+          devices = json.load(sys.stdin)["devices"]
+          candidates = [
+              d for runtime in sorted(devices, reverse=True)
+              for d in devices[runtime]
+              if "iPhone" in d["name"]
+          ]
+          print(candidates[0]["udid"] if candidates else "")
+          ')
+          if [ -z "$udid" ]; then
+            echo "::error::No iPhone simulator available on this runner"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$udid" || true
 

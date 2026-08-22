@@ -9,7 +9,23 @@ struct KeyboardRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Strip(model: model, theme: theme)
+            // The band above the keys. M4 fills it with the suggestion bar and idle toolbar
+            // (UI-SPEC.md §7); until then it is reserved space.
+            //
+            // Not collapsed to zero on purpose: the keyboard's total height is derived from it
+            // (`KeyboardMetrics.preferredKeyboardHeight`), so dropping it in Release would make
+            // the shipping keyboard 28 pt shorter than every geometry measurement taken so far,
+            // and than the Debug build the UI-test coordinate calibration is built against.
+            //
+            // In Release this is a constant view holding no reference to the model. An
+            // `@ObservedObject` subscribes whether or not the body reads it, so a shared Strip
+            // type would keep a live subscription to `pressedKeyIDs` — which changes on every
+            // touch — to render a fixed blank band.
+            #if DEBUG
+            DebugStrip(model: model, theme: theme)
+            #else
+            Color.clear.frame(height: KeyboardTheme.stripHeight)
+            #endif
 
             #if DEBUG
             if model.showDiagnostics {
@@ -28,30 +44,6 @@ struct KeyboardRootView: View {
 }
 
 // MARK: - Strip
-//
-// The band above the keys. M4 fills it with the suggestion bar and idle toolbar
-// (UI-SPEC.md §7); until then it is **reserved space, deliberately empty**.
-//
-// It is not collapsed to zero on purpose: the keyboard's total height is derived from it
-// (`KeyboardMetrics.preferredKeyboardHeight`), so a Release build that dropped the strip
-// would be 28 pt shorter than every geometry measurement taken so far and than the Debug
-// build the UI-test coordinate calibration is built against.
-
-private struct Strip: View {
-    @ObservedObject var model: KeyboardViewModel
-    let theme: KeyboardTheme
-
-    var body: some View {
-        Group {
-            #if DEBUG
-            DebugStripContent(model: model, runner: model.diagnostics, theme: theme)
-            #else
-            Color.clear
-            #endif
-        }
-        .frame(height: KeyboardTheme.stripHeight)
-    }
-}
 
 #if DEBUG
 /// The milestone label, live memory readout and diagnostics toggle — a development tool.
@@ -60,10 +52,19 @@ private struct Strip: View {
 /// `ObservableObject` does not forward `objectWillChange`, so the previous version's memory
 /// figure never actually updated: the 1 Hz timer ran purely to mutate a value nothing was
 /// watching.
-private struct DebugStripContent: View {
+private struct DebugStrip: View {
     @ObservedObject var model: KeyboardViewModel
     @ObservedObject var runner: DiagnosticsRunner
     let theme: KeyboardTheme
+
+    /// Observes `runner` directly rather than through `model.diagnostics`: a nested
+    /// `ObservableObject` does not forward `objectWillChange`, which is why the previous
+    /// memory figure never updated while a 1 Hz timer kept computing it.
+    init(model: KeyboardViewModel, theme: KeyboardTheme) {
+        self.model = model
+        self.runner = model.diagnostics
+        self.theme = theme
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -94,6 +95,7 @@ private struct DebugStripContent: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
+        .frame(height: KeyboardTheme.stripHeight)
     }
 
     private var memoryColor: Color {

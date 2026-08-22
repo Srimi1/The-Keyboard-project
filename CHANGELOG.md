@@ -34,10 +34,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signing-expiry countdown in the host app, so the free personal team's 7-day lapse is visible
   before the keyboard stops working, plus `Scripts/redeploy.sh` to renew it in one command.
 - In-app privacy statement (nothing leaves the device, no network code at all).
+- `Tests/KeyboardHandshakeTests.swift` — 8 tests pinning the write throttle, including the
+  clock-skew regression above. The throttle fails invisibly when it errs toward suppressing,
+  so it is worth testing rather than observing.
 - `scrollUntilHittable` in the UI-test harness, so onboarding copy changes cannot masquerade
   as touch-layer failures.
 
 ### Fixed
+- **CI could not have passed, and would have failed confusingly.** The workflow pinned Xcode
+  15.4 while the project needs Xcode 16+ / Swift 6, `|| true` meant test failures were
+  swallowed, and the simulator picker could emit an empty UDID while still exiting 0 —
+  handing `id=` to `xcodebuild`. It now selects the newest Xcode present, fails loudly with
+  the available device list when no iPhone simulator exists, and tests gate.
+- **A future-dated handshake suppressed every later write.** `isRedundant` compared
+  `now.timeIntervalSince(stored.lastSeenAt) < staleAfter`; a record dated ahead of now — clock
+  moved backwards, or a restored backup — produced a negative age, read as "fresh", and froze
+  the host app's setup status. Covered by a regression test that fails without the fix.
+- **A lapsed provisioning profile read as "expires in 0 days".** `dateComponents` returns 0
+  for anything under 24 hours in either direction, so an already-dead profile looked
+  reassuring on the one screen whose job is to warn. Expiry is now decided from the date.
+- The Release strip held an `@ObservedObject` it never read. An observed object subscribes
+  whether or not the body uses it, so a blank band kept a live subscription to `pressedKeyIDs`
+  — which changes on every touch. Release now renders a constant view holding no model
+  reference.
+- Removed a force-unwrap of `URL(string: UIApplication.openSettingsURLString)`.
 - The keyboard's memory readout never updated. `diagnostics` is a nested `ObservableObject`
   and does not forward `objectWillChange`, so the 1 Hz timer mutated a value nothing observed.
   The Debug strip now observes the runner directly.

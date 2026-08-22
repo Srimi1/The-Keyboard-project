@@ -24,11 +24,4 @@ nonisolated enum ProvisioningProfile {
         let parsed = try? PropertyListSerialization.propertyList(from: plist, options: [], format: nil)
         return (parsed as? [String: Any])?["ExpirationDate"] as? Date
     }
-
-    /// Whole days left. Negative once the profile has lapsed — which is exactly when the
-    /// keyboard is already gone and the reason matters most.
-    static func daysRemaining(from now: Date = Date()) -> Int? {
-        guard let expiry = expiryDate() else { return nil }
-        return Calendar.current.dateComponents([.day], from: now, to: expiry).day
-    }
 }
