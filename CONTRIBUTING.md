@@ -10,7 +10,7 @@ Our goal is to build the definitive personal iOS keyboard extension that brings 
 
 ### Prerequisites
 
-- macOS with Xcode 15+ (iOS 16+ SDK)
+- macOS with Xcode 26 or newer (the deployment target remains iOS 16)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 - Git
 
@@ -47,7 +47,7 @@ Every contribution must honor the core rules documented in [CLAUDE.md](CLAUDE.md
 1. **Zero Network, Ever**: The extension never makes network calls. No sync, no analytics, no crash reporters ([ADR-005](docs/DECISIONS.md)).
 2. **Memory Budget**: Extension physical memory footprint must remain **≤ 40 MB** steady state (against iOS jetsam limit near ~60 MB).
 3. **Typing Always Works**: Even if Full Access is revoked or App Groups fail, the keyboard must never crash and must always continue to type plain text.
-4. **Android Gboard Parity**: When choosing between alternative behaviors, we strictly follow Gboard for Android ([docs/UI-SPEC.md](docs/UI-SPEC.md)).
+4. **Android Gboard Reference**: Match the owner's Android Gboard layout and feel where iOS extension rules permit it; platform safety and privacy take precedence ([docs/UI-SPEC.md](docs/UI-SPEC.md)).
 
 ---
 

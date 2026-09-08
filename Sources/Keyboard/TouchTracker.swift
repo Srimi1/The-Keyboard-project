@@ -12,6 +12,14 @@ struct KeyboardTouch: Equatable {
     let location: CGPoint
 }
 
+struct KeyboardAccessibilityKey: Equatable {
+    let id: String
+    let frame: CGRect
+    let label: String
+    let value: String?
+    let action: KeyAction
+}
+
 /// Raw multi-touch capture for the key area.
 ///
 /// SwiftUI cannot express keyboard touch handling: a `DragGesture` tracks one logical drag,
@@ -22,6 +30,8 @@ struct KeyboardTouch: Equatable {
 /// SwiftUI still renders the keys; this view only reports where fingers are.
 struct TouchTracker: UIViewRepresentable {
     let onTouches: ([KeyboardTouch]) -> Void
+    var accessibilityKeys: [KeyboardAccessibilityKey] = []
+    var onAccessibilityAction: ((KeyAction) -> Void)?
     /// Areas this layer must not consume, so the UIKit views beneath it stay reachable —
     /// currently the globe key, which has to be a real UIButton (C-47).
     var passthroughRects: [CGRect] = []
@@ -30,12 +40,14 @@ struct TouchTracker: UIViewRepresentable {
         let view = MultiTouchView()
         view.onTouches = onTouches
         view.passthroughRects = passthroughRects
+        view.updateAccessibilityElements(accessibilityKeys, action: onAccessibilityAction)
         return view
     }
 
     func updateUIView(_ view: MultiTouchView, context: Context) {
         view.onTouches = onTouches
         view.passthroughRects = passthroughRects
+        view.updateAccessibilityElements(accessibilityKeys, action: onAccessibilityAction)
     }
 }
 
@@ -43,6 +55,8 @@ final class MultiTouchView: UIView {
 
     var onTouches: (([KeyboardTouch]) -> Void)?
     var passthroughRects: [CGRect] = []
+    private var accessibilityKeys: [KeyboardAccessibilityKey] = []
+    private var accessibilityElementsByID: [String: KeyboardKeyAccessibilityElement] = [:]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -51,10 +65,42 @@ final class MultiTouchView: UIView {
         isMultipleTouchEnabled = true
         backgroundColor = .clear
         isExclusiveTouch = false
+        isAccessibilityElement = false
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func updateAccessibilityElements(
+        _ keys: [KeyboardAccessibilityKey],
+        action: ((KeyAction) -> Void)?
+    ) {
+        guard keys != accessibilityKeys || accessibilityElements == nil else { return }
+        let oldIDs = Set(accessibilityKeys.map(\.id))
+        let newIDs = Set(keys.map(\.id))
+        accessibilityKeys = keys
+        var updatedByID: [String: KeyboardKeyAccessibilityElement] = [:]
+        let updatedElements = keys.map { descriptor in
+            let element = accessibilityElementsByID[descriptor.id]
+                ?? KeyboardKeyAccessibilityElement(accessibilityContainer: self)
+            element.accessibilityIdentifier = "keyboard.\(descriptor.id)"
+            element.accessibilityLabel = descriptor.label
+            element.accessibilityValue = descriptor.value
+            element.accessibilityTraits = .keyboardKey
+            element.accessibilityFrameInContainerSpace = descriptor.frame
+            element.activation = { action?(descriptor.action); return action != nil }
+            updatedByID[descriptor.id] = element
+            return element
+        }
+        accessibilityElementsByID = updatedByID
+        accessibilityElements = updatedElements
+
+        // Shift only changes labels/actions and therefore keeps focus on the same object.
+        // A layer/globe structure change needs VoiceOver to re-query the available keys.
+        if oldIDs != newIDs, window != nil, UIAccessibility.isVoiceOverRunning {
+            UIAccessibility.post(notification: .layoutChanged, argument: nil)
+        }
+    }
 
     /// This view sits above the drawn keys and consumes everything, which would leave any
     /// real UIKit control underneath unreachable. Returning nil lets those points fall
@@ -93,5 +139,13 @@ final class MultiTouchView: UIView {
         onTouches(ordered.map {
             KeyboardTouch(id: ObjectIdentifier($0), phase: phase, location: $0.location(in: self))
         })
+    }
+}
+
+private final class KeyboardKeyAccessibilityElement: UIAccessibilityElement {
+    var activation: (() -> Bool)?
+
+    override func accessibilityActivate() -> Bool {
+        activation?() ?? false
     }
 }

@@ -166,6 +166,75 @@ The keyboard's strip keeps its **height** in Release but renders nothing. Collap
 
 ---
 
+## ADR-012 — Keep the dependency-free native keyboard implementation
+
+**Date:** 2026-09-08 · **Status:** Accepted; supersedes ADR-003
+
+**Context.** The repository now contains a working native UIKit/SwiftUI touch engine and has
+no KeyboardKit dependency. Reintroducing a binary framework would add supply-chain, memory and
+licensing surface without replacing the device acceptance work still required.
+
+**Decision.** Keep the native, dependency-free implementation. The generated Xcode project is
+derived from `project.yml`; no third-party runtime framework is added for v1.
+
+**Consequences.** The project owns touch tracking, callouts, shift/layer state and clipboard UI,
+so each receives direct regression coverage. KeyboardKit-specific questions Q-02 and Q-08 are
+closed as not applicable.
+
+---
+
+## ADR-013 — v1 clipboard capture is explicit and manual
+
+**Date:** 2026-09-08 · **Status:** Accepted; refines ADR-005
+
+**Context.** Lifecycle reads and automatic polling conflict with the requested privacy model and
+can trigger paste permission prompts at surprising times. Sensitive-content metadata is only a
+best-effort signal.
+
+**Decision.** v1 uses tap-to-save only through Apple's `PasteButton`, after a one-time local
+retention disclosure. Opening or foregrounding either process never reads clipboard values.
+Automatic capture remains unavailable until separate permission and password-manager trials pass.
+
+**Consequences.** The user may miss values copied between explicit saves. In exchange, capture is
+intentional, testable and honest. The v1 toolbar provides clipboard and inline settings controls;
+the extension never launches the host app.
+
+---
+
+## ADR-014 — Suggestions and autocorrect follow the stable public v1
+
+**Date:** 2026-09-08 · **Status:** Accepted; supersedes ADR-009 for v1 scope
+
+**Context.** Reliable raw typing, safe clipboard persistence and real-device evidence are the
+launch blockers. Shipping an undertested correction engine would make the keyboard less dependable.
+
+**Decision.** Public v1 performs literal tap typing with the existing capitalization,
+double-space and deletion behaviors. Suggestions, autocorrect, learned words and next-word
+prediction are deferred to a later release.
+
+**Consequences.** The first launch has a narrower, verifiable contract. Future correction work
+must use a new acceptance plan and always preserve access to the literal typed text.
+
+---
+
+## ADR-015 — The Release toolbar serves clipboard and keyboard settings
+
+**Date:** 2026-09-08 · **Status:** Accepted; supersedes ADR-011 only for the Release-strip and clipboard-timing consequences. ADR-011's diagnostics decision remains accepted.
+
+**Context.** ADR-011 correctly removed development diagnostics from Release, but its statements
+that the reserved strip would remain empty and that clipboard work would wait for a later
+milestone no longer describe the implemented v1.
+
+**Decision.** Keep the existing strip height and use it for production clipboard and inline
+settings controls. Diagnostics, probes and UI-test injection remain Debug-only. Suggestions and
+autocorrect remain deferred by ADR-014.
+
+**Consequences.** Release and Debug retain the same core geometry while Release exposes useful,
+privacy-scoped controls. The extension never launches the host app, and the toolbar must continue
+to work without affecting ordinary typing or next-keyboard switching.
+
+---
+
 ## Template for new ADRs
 
 ```markdown

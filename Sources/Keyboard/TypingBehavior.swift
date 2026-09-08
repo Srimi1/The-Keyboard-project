@@ -32,7 +32,14 @@ struct ShiftController {
 
     /// Shift falls back to lowercase after one character; caps lock does not.
     mutating func didInsertCharacter() {
+        lastTapAt = nil
         if state == .shifted { state = .off }
+    }
+
+    /// Any non-shift action breaks the double-tap sequence. Two shift taps separated by a
+    /// character, deletion, return or layer change are not a caps-lock gesture.
+    mutating func cancelTapSequence() {
+        lastTapAt = nil
     }
 
     /// Auto-capitalization result. Never overrides caps lock, and never counts as a tap —
@@ -162,7 +169,7 @@ enum ReturnKeyLabel {
 
 // MARK: - Key repeat
 
-/// Hold-to-repeat for backspace, accelerating into whole-word deletion the way Gboard does.
+/// Hold-to-repeat for backspace, accelerating to two characters per repeat.
 ///
 /// Driven by a cancellable `Task` rather than a `Timer`: it stays on the MainActor with no
 /// isolation gymnastics, and unlike a run-loop timer it cannot stall while something scrolls.
@@ -171,13 +178,16 @@ final class KeyRepeater {
 
     private var task: Task<Void, Never>?
 
-    /// - Parameter fire: called immediately for the initial press, then on each repeat, with
-    ///   the number of characters to remove. That count rises from one to two after
-    ///   `deletesBeforeAcceleration` repeats — AOSP's escalation, which never becomes a
-    ///   word-level delete.
-    func start(fire: @escaping (_ characterCount: Int) -> Void) {
+    /// The initial press is intentionally separate from repeats: it must pass through the
+    /// view model's normal backspace semantics (including undoing a just-created ". ").
+    /// Repeats receive a character count that rises from one to two after
+    /// `deletesBeforeAcceleration` repeats.
+    func start(
+        initialFire: () -> Void,
+        repeatFire: @escaping (_ characterCount: Int) -> Void
+    ) {
         stop()
-        fire(1)
+        initialFire()
 
         task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.nanoseconds(KeyboardTimings.keyRepeatStartTimeout))
@@ -187,7 +197,7 @@ final class KeyRepeater {
             while !Task.isCancelled {
                 repeatCount += 1
                 let accelerated = repeatCount >= KeyboardTimings.deletesBeforeAcceleration
-                fire(accelerated ? KeyboardTimings.acceleratedDeleteCount : 1)
+                repeatFire(accelerated ? KeyboardTimings.acceleratedDeleteCount : 1)
                 try? await Task.sleep(nanoseconds: Self.nanoseconds(KeyboardTimings.keyRepeatInterval))
             }
         }

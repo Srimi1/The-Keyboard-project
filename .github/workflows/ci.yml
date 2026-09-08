@@ -2,88 +2,156 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test (iOS Simulator)
-    runs-on: macos-15
+  verify:
+    name: Production baseline
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODEGEN_VERSION: 2.45.4
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+
     steps:
-      - name: Checkout repository
+      - name: Checkout exact source
         uses: actions/checkout@v4
 
-      # project.yml sets SWIFT_APPROACHABLE_CONCURRENCY and SWIFT_DEFAULT_ACTOR_ISOLATION,
-      # and Sources/ applies `nonisolated` to type declarations — all Xcode 16+ / Swift 6.
-      # Pinning an older Xcode here fails to compile instead of catching a real regression,
-      # and pinning a specific new one breaks whenever the runner image rolls forward.
-      - name: Select the newest installed Xcode
-        run: |
-          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          echo "Using $latest"
-          sudo xcode-select -switch "$latest"
-          xcodebuild -version
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate the Xcode project
-        run: xcodegen generate
-
-      - name: Build host app and keyboard extension
-        run: |
-          xcodebuild build \
-            -project KeyboardProject.xcodeproj \
-            -scheme KeyboardProject \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
-
-      # Pick whatever iPhone the runner actually has; pinning a model name breaks silently
-      # when the image updates.
-      # Pick whatever iPhone the runner actually has; pinning a model name breaks silently
-      # when the image updates. Matches on "iPhone" anywhere in the name, because runner
-      # images and local machines both carry renamed devices.
-      - name: Pick a simulator
-        id: sim
+      - name: Verify Xcode and iOS SDK
+        shell: bash
         run: |
           set -euo pipefail
-          udid=$(xcrun simctl list devices available -j | python3 -c '
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          case "$sdk_version" in
+            26.*) ;;
+            *) echo "::error::iOS 26 SDK required; found $sdk_version"; exit 1 ;;
+          esac
+
+      - name: Install pinned XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/xcodegen.zip"
+          destination="$RUNNER_TEMP/xcodegen"
+          curl --fail --location --silent --show-error \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip" \
+            --output "$archive"
+          echo "$XCODEGEN_SHA256  $archive" | shasum -a 256 -c -
+          ditto -x -k "$archive" "$destination"
+          echo "$destination/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate project and run static policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen --version
+          xcodegen generate
+          ./Scripts/verify-static.sh
+
+      - name: Select and boot an iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
           candidates = [
-              d for runtime in sorted(devices, reverse=True)
-              for d in devices[runtime]
-              if "iPhone" in d["name"]
+              device
+              for runtime in sorted(devices, reverse=True)
+              for device in devices[runtime]
+              if "iPhone" in device.get("name", "")
           ]
           print(candidates[0]["udid"] if candidates else "")
-          ')
+          ')"
           if [ -z "$udid" ]; then
-            echo "::error::No iPhone simulator available on this runner"
+            echo "::error::No available iPhone simulator"
             xcrun simctl list devices available
             exit 1
           fi
-          echo "Using simulator $udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$udid" || true
+          xcrun simctl boot "$udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$udid" -b
 
-      # Unit tests only, and they gate — no `|| true`.
-      #
-      # The 19 XCUITest touch trials in UITests/ are deliberately not run here. They drive
-      # synthesized multi-touch, and whether XCUITest delivers one touch or two is decided
-      # per app session (Q-13 in docs/CONSTRAINTS.md) — measured, not guessed. That makes
-      # them a poor CI gate: a red badge would report the harness, not the keyboard. Run
-      # them locally with `make test`.
-      - name: Run unit tests
+      - name: Build Debug for simulator
+        shell: bash
         run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES
+
+      - name: Build Release for iPhone architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES
+
+      - name: Run unit tests serially
+        shell: bash
+        run: |
+          set -euo pipefail
           xcodebuild test \
             -project KeyboardProject.xcodeproj \
             -scheme KeyboardProject \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/UnitTests.xcresult" \
             -only-testing:KeyboardProjectTests \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Run deterministic UI tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project KeyboardProject.xcodeproj \
+            -scheme KeyboardProject \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/UITests.xcresult" \
+            -only-testing:KeyboardProjectUITests/TypingTrials \
+            -only-testing:KeyboardProjectUITests/BackspaceTrials \
+            -only-testing:KeyboardProjectUITests/LayerTrials \
+            -only-testing:KeyboardProjectUITests/ClipboardTrials \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/UnitTests.xcresult
+            ${{ runner.temp }}/UITests.xcresult

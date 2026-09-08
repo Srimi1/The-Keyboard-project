@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Every timing and distance that governs how the keyboard feels, in one place.
+/// Implemented timings and distances that govern how the keyboard feels, in one place.
 ///
 /// Values come from **AOSP LatinIME** — Gboard's open-source ancestor and the closest primary
 /// source to its closed-source behavior (ADR-001). Source paths are relative to
@@ -35,15 +35,11 @@ enum KeyboardTimings {
 
     // MARK: - Shift
 
-    /// Two shift taps within this window latch caps lock, measured from the first tap's release
-    /// to the second tap's press. Not a LatinIME resource — it is the Android platform's
+    /// Two completed shift taps within this window latch caps lock. Not a LatinIME resource —
+    /// it is based on the Android platform's
     /// `ViewConfiguration.DOUBLE_TAP_TIMEOUT`, used via `getDoubleTapTimeout()` in
     /// java/src/.../keyboard/internal/TimerHandler.java:174.
     static let doubleTapShiftTimeout: TimeInterval = 0.300
-
-    /// Holding shift also latches caps lock, on a much longer window than a normal long press.
-    /// `config_longpress_shift_lock_timeout` — java/res/values/config-common.xml:57
-    static let longPressShiftLockTimeout: TimeInterval = 1.200
 
     // MARK: - Punctuation
 
@@ -58,23 +54,6 @@ enum KeyboardTimings {
     /// User-adjustable in Gboard between 100 and 700 ms in 10 ms steps; this is the default.
     static let longPressTimeout: TimeInterval = 0.300
 
-    /// When the finger is already sliding, the long-press timeout is tripled.
-    /// `MULTIPLIER_FOR_LONG_PRESS_TIMEOUT_IN_SLIDING_INPUT` —
-    /// java/src/.../keyboard/PointerTracker.java:140
-    static let longPressSlidingMultiplier: Double = 3
-
-    // MARK: - Key preview
-
-    /// How long the enlarged preview lingers after release.
-    /// `config_key_preview_linger_timeout` — java/res/values/config-common.xml:40
-    static let keyPreviewLinger: TimeInterval = 0.070
-
-    /// `config_key_preview_show_up_duration` — java/res/values/config-common.xml:35
-    static let keyPreviewShowUpDuration: TimeInterval = 0.017
-
-    /// `config_key_preview_dismiss_duration` — java/res/values/config-common.xml:36
-    static let keyPreviewDismissDuration: TimeInterval = 0.053
-
     // MARK: - Touch
 
     /// Slack around a key's visual bounds before a drifting finger is treated as having left
@@ -85,14 +64,6 @@ enum KeyboardTimings {
     /// dp and iOS points are both 1/160 inch at 1×, so the number carries over directly.
     static let keyHysteresis: CGFloat = 8.0
 
-    /// A press landing within this time *and* distance of the previous release is discarded as
-    /// digitizer noise. Note it is an up-to-down filter, not a during-touch one.
-    /// `config_touch_noise_threshold_time` — java/res/values/config-common.xml:97
-    static let touchNoiseThresholdTime: TimeInterval = 0.040
-
-    /// `config_touch_noise_threshold_distance` — java/res/values/config-common.xml:96
-    static let touchNoiseThresholdDistance: CGFloat = 12.6
-
     // MARK: - Defaults Gboard ships with (java/res/xml/prefs_*.xml, config-per-form-factor.xml)
 
     /// Auto-capitalization is on by default.
@@ -101,10 +72,7 @@ enum KeyboardTimings {
     /// Double-space → period is on by default.
     static let doubleSpacePeriodDefault = true
 
-    /// The key-preview popup is on by default on phones (off on tablets).
-    static let keyPreviewDefault = true
-
-    /// Haptics on, keypress sound off — the phone defaults. Both land at M2.
+    /// Haptics on, keypress sound off — the phone defaults.
     static let hapticFeedbackDefault = true
     static let keypressSoundDefault = false
 }

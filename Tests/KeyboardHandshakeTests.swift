@@ -7,6 +7,7 @@ import XCTest
 /// sit on `viewWillAppear`, which runs every time the keyboard appears in any app. A throttle
 /// that is wrong in the *suppressing* direction is invisible — the host app just quietly shows
 /// stale setup status forever — so it is worth pinning down here rather than on a device.
+@MainActor
 final class KeyboardHandshakeTests: XCTestCase {
 
     private let staleAfter: TimeInterval = 6 * 60 * 60

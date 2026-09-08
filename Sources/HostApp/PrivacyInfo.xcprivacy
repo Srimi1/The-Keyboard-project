@@ -15,10 +15,9 @@
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
-				<!-- App Group suite only (AppGroup.swift, C-12) — 1C8F.1 covers reading/writing
-				     data shared across the app and its extension via the same App Group, not
-				     plain UserDefaults.standard, which this project does not use. -->
+				<!-- App Group settings/history coordination and app-local settings fallback. -->
 				<string>1C8F.1</string>
+				<string>CA92.1</string>
 			</array>
 		</dict>
 	</array>

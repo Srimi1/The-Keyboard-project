@@ -1,23 +1,25 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported builds
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+There is no public production release yet. Security fixes target the latest source and active
+TestFlight candidate; old development-signed builds are not supported.
 
-## Privacy & Security Invariant
+## Privacy and security boundary
 
-**The Keyboard Project is 100% offline by design.**
+- The app and keyboard contain no app-owned networking, tracking, analytics or advertising.
+- Clipboard values are supplied only after an explicit system Paste button action.
+- History is stored in the local App Group container, excluded from backups and written with
+  complete data protection on iPhone.
+- Typing works without Full Access. Full Access is used only for shared local clipboard storage
+  and feedback behavior.
+- Clipboard text is never intentionally logged.
+- Sensitive-content markers are best-effort and cannot identify every secret. Do not save a
+  password or other secret to history; delete it immediately if saved accidentally.
 
-- **Zero Network Traffic:** The keyboard extension contains no networking code, telemetry, analytics, or background sync.
-- **Local-Only Storage:** Clipboard history and settings are stored strictly in the local on-device App Group container (`group.com.srijan.keyboardproject`) and never leave your hardware.
-- **Sandboxed Execution:** Full Access is requested exclusively for accessing the local pasteboard, triggering system haptics, and playing typing sounds.
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
-
-If you discover a potential security or privacy issue, please do not open a public issue. Instead, report it directly to the repository maintainer via private message or email at:
-
-**srijan@example.com** (or open a private security advisory on GitHub).
-
-We take security and input privacy extremely seriously and will investigate and respond promptly.
+Do not post clipboard or security details in a public issue. Use the repository's
+[private security advisory form](https://github.com/Srimi1/The-Keyboard-project/security/advisories/new).
+Include the affected build/source revision, iOS/device, reproduction steps and impact, but
+redact real clipboard contents, credentials and signing data.

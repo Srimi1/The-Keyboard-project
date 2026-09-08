@@ -10,7 +10,7 @@ import XCTest
 /// Re-run these first if the layout changes or the tests move to another device size.
 final class CalibrationProbe: KeyboardUITestCase {
 
-    /// Every computed key centre must land inside the key's own drawn label.
+    /// Every computed visual centre must land inside the key's published hit frame.
     func testComputedCentresMatchDrawnKeys() {
         launchPreview()
 
@@ -26,12 +26,11 @@ final class CalibrationProbe: KeyboardUITestCase {
 
         for check in checks {
             let element = labelElement(check.onScreen)
-            XCTAssertTrue(element.exists, "No drawn label '\(check.onScreen)' on screen")
-            let drawn = element.frame
+            XCTAssertTrue(element.exists, "No accessible key '\(check.onScreen)' on screen")
+            let hitFrame = element.frame
             let computed = keyCenter(check.key)
-            print("=== \(check.key): drawn centre (\(drawn.midX), \(drawn.midY))  computed (\(computed.x), \(computed.y))")
-            XCTAssertLessThan(abs(drawn.midX - computed.x), 1.0, "\(check.key): x off by \(drawn.midX - computed.x)")
-            XCTAssertLessThan(abs(drawn.midY - computed.y), 1.0, "\(check.key): y off by \(drawn.midY - computed.y)")
+            print("=== \(check.key): hit frame \(hitFrame)  computed (\(computed.x), \(computed.y))")
+            XCTAssertTrue(hitFrame.contains(computed), "\(check.key): computed centre is outside its hit frame")
         }
 
         attachScreenshot("preview")

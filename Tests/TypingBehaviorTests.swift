@@ -7,6 +7,7 @@ import UIKit
 /// These exist because the alternative is checking shift and auto-capitalization by hand on a
 /// device after every change, and the failure mode — a keyboard that capitalizes in the wrong
 /// place — is exactly the kind of small wrongness that makes a keyboard feel third-party.
+@MainActor
 final class AutoCapitalizationTests: XCTestCase {
 
     private func shouldCapitalize(_ context: String?, _ type: UITextAutocapitalizationType = .sentences) -> Bool {
@@ -93,6 +94,7 @@ final class AutoCapitalizationTests: XCTestCase {
     }
 }
 
+@MainActor
 final class ShiftControllerTests: XCTestCase {
 
     func testTapShiftsThenFallsBackAfterOneCharacter() {
@@ -163,8 +165,20 @@ final class ShiftControllerTests: XCTestCase {
         shift.applyAutoCapitalization(false)
         XCTAssertEqual(shift.state, .capsLock)
     }
+
+    func testInterveningCharacterBreaksShiftDoubleTapSequence() {
+        var shift = ShiftController()
+        let start = Date()
+
+        shift.handleTap(now: start)
+        shift.didInsertCharacter()
+        shift.handleTap(now: start.addingTimeInterval(0.1))
+
+        XCTAssertEqual(shift.state, .shifted, "non-consecutive shift taps must not latch caps lock")
+    }
 }
 
+@MainActor
 final class ReturnKeyLabelTests: XCTestCase {
 
     func testLabelsMatchApplesKeyboard() {
@@ -179,6 +193,7 @@ final class ReturnKeyLabelTests: XCTestCase {
     }
 }
 
+@MainActor
 final class KeyboardLayoutTests: XCTestCase {
 
     func testBaseLayerHasFourRows() {
@@ -225,6 +240,7 @@ final class KeyboardLayoutTests: XCTestCase {
         let upper = KeyboardLayout.rows(layer: .base, shift: .shifted, needsGlobe: false)
         XCTAssertEqual(lower[0].keys.first?.label, "q")
         XCTAssertEqual(upper[0].keys.first?.label, "Q")
+        XCTAssertEqual(lower[0].keys.map(\.id), upper[0].keys.map(\.id), "shift must not change physical key identity")
     }
 
     func testReturnKeyUsesTheFieldsLabel() {
@@ -238,6 +254,7 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 }
 
+@MainActor
 final class MoreKeysTests: XCTestCase {
 
     private func key(_ character: String) -> Key { .letter(character) }
@@ -312,6 +329,7 @@ final class MoreKeysTests: XCTestCase {
     }
 }
 
+@MainActor
 final class KeyboardMetricsTests: XCTestCase {
 
     private let size = CGSize(width: 390, height: 216)

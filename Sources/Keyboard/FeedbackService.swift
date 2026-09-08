@@ -14,8 +14,8 @@ final class FeedbackService {
     /// is no notification for it changing (C-41).
     var hasFullAccess = false
 
-    var hapticsEnabled = KeyboardTimings.hapticFeedbackDefault
-    var soundEnabled = KeyboardTimings.keypressSoundDefault
+    private(set) var hapticsEnabled = KeyboardTimings.hapticFeedbackDefault
+    private(set) var soundEnabled = KeyboardTimings.keypressSoundDefault
 
     /// Generators are kept alive rather than created per keystroke: constructing one warms up
     /// the Taptic Engine, and doing that at 5 keys per second is wasteful.
@@ -23,6 +23,11 @@ final class FeedbackService {
     private let selection = UISelectionFeedbackGenerator()
 
     private var isActive: Bool { hasFullAccess }
+
+    func apply(_ settings: KeyboardSettings) {
+        hapticsEnabled = settings.hapticsEnabled
+        soundEnabled = settings.soundEnabled
+    }
 
     /// Call when the keyboard appears — asking the engine to warm up makes the first tap feel
     /// the same as the rest.

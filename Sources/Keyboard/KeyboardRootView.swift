@@ -3,99 +3,191 @@ import UIKit
 
 struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
+    @ObservedObject private var settings: KeyboardSettingsStore
     @Environment(\.colorScheme) private var colorScheme
 
-    private var theme: KeyboardTheme { .forColorScheme(colorScheme) }
+    init(model: KeyboardViewModel) {
+        self.model = model
+        self._settings = ObservedObject(wrappedValue: model.settings)
+    }
+
+    private var theme: KeyboardTheme {
+        switch settings.values.appearance {
+        case .system: return .forColorScheme(colorScheme)
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // The band above the keys. M4 fills it with the suggestion bar and idle toolbar
-            // (UI-SPEC.md §7); until then it is reserved space.
-            //
-            // Not collapsed to zero on purpose: the keyboard's total height is derived from it
-            // (`KeyboardMetrics.preferredKeyboardHeight`), so dropping it in Release would make
-            // the shipping keyboard 28 pt shorter than every geometry measurement taken so far,
-            // and than the Debug build the UI-test coordinate calibration is built against.
-            //
-            // In Release this is a constant view holding no reference to the model. An
-            // `@ObservedObject` subscribes whether or not the body reads it, so a shared Strip
-            // type would keep a live subscription to `pressedKeyIDs` — which changes on every
-            // touch — to render a fixed blank band.
-            #if DEBUG
-            DebugStrip(model: model, theme: theme)
-            #else
-            Color.clear.frame(height: KeyboardTheme.stripHeight)
-            #endif
+            KeyboardStrip(model: model, clipboard: model.clipboard, theme: theme)
 
-            #if DEBUG
-            if model.showDiagnostics {
-                DiagnosticsPanel(model: model, theme: theme)
-            } else {
-                KeyGrid(model: model, theme: theme)
-            }
-            #else
-            KeyGrid(model: model, theme: theme)
-            #endif
+            activePanel
         }
         // Transparent, never an opaque fill — iOS 26 wraps keyboards in a system glass
         // container and an opaque background renders as a gray bar (CONSTRAINTS §8).
         .background(Color.clear)
     }
+
+    @ViewBuilder
+    private var activePanel: some View {
+        switch model.panel {
+        case .keys:
+            KeyGrid(model: model, theme: theme)
+        case .clipboard:
+            ClipboardPanel(
+                model: model,
+                clipboard: model.clipboard,
+                settings: settings,
+                theme: theme
+            )
+        case .settings:
+            KeyboardSettingsPanel(
+                model: model,
+                settings: settings,
+                clipboard: model.clipboard,
+                theme: theme
+            )
+        case .diagnostics:
+            #if DEBUG
+            DiagnosticsPanel(model: model, theme: theme)
+            #else
+            KeyGrid(model: model, theme: theme)
+            #endif
+        }
+    }
 }
 
 // MARK: - Strip
+//
+// The v1 band above the keys contains the clipboard/settings controls and paste chip.
+//
+// It is never collapsed: the keyboard's total height is derived from it
+// (`KeyboardMetrics.preferredKeyboardHeight`), and it must stay visible while the clipboard
+// panel is open, because the panel replaces the key area only (UI-SPEC.md §8).
+
+private struct KeyboardStrip: View {
+    @ObservedObject var model: KeyboardViewModel
+    @ObservedObject var clipboard: ClipboardController
+    let theme: KeyboardTheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            clipboardButton
+
+            // The chip previews the freshest explicit save so pasting it costs one tap and never
+            // opens the panel (CLIPBOARD.md §6).
+            if let fresh = clipboard.freshItem, model.panel == .keys {
+                PasteChip(text: fresh.text, theme: theme) {
+                    model.insertClipboardItem(fresh)
+                }
+                .transition(.opacity)
+            }
+
+            Spacer(minLength: 0)
+
+            settingsButton
+
+            #if DEBUG
+            DebugReadout(model: model, runner: model.diagnostics, theme: theme)
+            #endif
+        }
+        .padding(.horizontal, 8)
+        .frame(height: KeyboardTheme.stripHeight)
+        // `freshItem` flips outside any explicit withAnimation, so without this the chip's
+        // `.transition` never runs and it snaps in and out.
+        .animation(.easeOut(duration: 0.2), value: clipboard.freshItem)
+    }
+
+    private var clipboardButton: some View {
+        Button {
+            model.toggleClipboard()
+        } label: {
+            Image(systemName: model.panel == .clipboard ? "keyboard" : "doc.on.clipboard")
+                .font(.system(size: 15))
+                .foregroundStyle(model.panel == .clipboard ? theme.accent : theme.keyLabel)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(model.panel == .clipboard ? "Back to keyboard" : "Clipboard")
+        .accessibilityIdentifier("keyboard.toolbar.clipboard")
+    }
+
+    private var settingsButton: some View {
+        Button { model.toggleSettings() } label: {
+            Image(systemName: model.panel == .settings ? "keyboard" : "gearshape")
+                .font(.system(size: 15))
+                .foregroundStyle(model.panel == .settings ? theme.accent : theme.keyLabel)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(model.panel == .settings ? "Back to keyboard" : "Keyboard settings")
+        .accessibilityIdentifier("keyboard.toolbar.settings")
+    }
+}
+
+/// The pill-shaped chip in the strip after a fresh explicit save (UI-SPEC.md §7).
+private struct PasteChip: View {
+    let text: String
+    let theme: KeyboardTheme
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.on.clipboard.fill")
+                    .font(.system(size: 9))
+                Text(text)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(theme.keyLabel)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(theme.functionKeyFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        // VoiceOver reads the whole label; a truncated copy keeps it usable when the pasteboard
+        // holds pages of text.
+        .accessibilityLabel("Paste \(String(text.prefix(80)))")
+    }
+}
 
 #if DEBUG
-/// The milestone label, live memory readout and diagnostics toggle — a development tool.
+/// Milestone label, live memory readout and the diagnostics toggle — a development tool.
 ///
-/// `runner` is observed directly rather than reached through `model.diagnostics`. A nested
-/// `ObservableObject` does not forward `objectWillChange`, so the previous version's memory
-/// figure never actually updated: the 1 Hz timer ran purely to mutate a value nothing was
-/// watching.
-private struct DebugStrip: View {
+/// `runner` is observed directly rather than reached through `model.diagnostics`: a nested
+/// `ObservableObject` does not forward `objectWillChange`, which is why the memory figure
+/// never updated while a 1 Hz timer kept computing it.
+private struct DebugReadout: View {
     @ObservedObject var model: KeyboardViewModel
     @ObservedObject var runner: DiagnosticsRunner
     let theme: KeyboardTheme
 
-    /// Observes `runner` directly rather than through `model.diagnostics`: a nested
-    /// `ObservableObject` does not forward `objectWillChange`, which is why the previous
-    /// memory figure never updated while a 1 Hz timer kept computing it.
-    init(model: KeyboardViewModel, theme: KeyboardTheme) {
-        self.model = model
-        self.runner = model.diagnostics
-        self.theme = theme
-    }
-
     var body: some View {
-        HStack(spacing: 8) {
-            Text("DEBUG")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.hintGlyph)
-
-            Spacer()
-
-            // Q-10: what `needsInputModeSwitchKey` actually returns on this device, in this
-            // host app. If it is false and no system globe is drawn below the keyboard, the
-            // user is stranded on our keyboard — see CONSTRAINTS §10.
+        HStack(spacing: 6) {
+            // Q-10: what `needsInputModeSwitchKey` actually returns here, in this host app.
             Text("globe \(model.needsGlobe ? "yes" : "NO")")
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(model.needsGlobe ? theme.hintGlyph : .orange)
 
             Text(String(format: "%.1f MB", runner.memoryMB))
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(memoryColor)
 
             Button {
                 model.perform(.diagnostics)
             } label: {
-                Text(model.showDiagnostics ? "Close" : "Diagnostics")
-                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "stethoscope")
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.accent)
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 10)
-        .frame(height: KeyboardTheme.stripHeight)
     }
 
     private var memoryColor: Color {
@@ -159,6 +251,11 @@ private struct KeyGrid: View {
                     onTouches: { touches in
                         model.handle(touches: touches, positionedKeys: keys)
                     },
+                    accessibilityKeys: accessibilityDescriptors(for: keys),
+                    onAccessibilityAction: { action in
+                        model.feedback.keyPressed()
+                        model.perform(action)
+                    },
                     passthroughRects: keys
                         .filter { $0.key.action == .nextKeyboard }
                         .map(\.hitRect)
@@ -181,6 +278,36 @@ private struct KeyGrid: View {
         }
     }
 
+    private func accessibilityDescriptors(for keys: [PositionedKey]) -> [KeyboardAccessibilityKey] {
+        keys.compactMap { positioned in
+            guard positioned.key.action != .nextKeyboard else { return nil }
+            let semantics = accessibilitySemantics(for: positioned.key)
+            return KeyboardAccessibilityKey(
+                id: positioned.id,
+                frame: positioned.hitRect,
+                label: semantics.label,
+                value: semantics.value,
+                action: positioned.key.action
+            )
+        }
+    }
+
+    private func accessibilitySemantics(for key: Key) -> (label: String, value: String?) {
+        switch key.action {
+        case .character(let text): return (text, nil)
+        case .backspace: return ("Delete", nil)
+        case .space: return ("Space", "English US")
+        case .newline: return (model.returnLabel.capitalized, nil)
+        case .shift:
+            let value = model.shiftState == .capsLock ? "Caps lock on" : (model.shiftState == .shifted ? "On" : "Off")
+            return ("Shift", value)
+        case .switchLayer(let layer):
+            return (layer == .base ? "Letters" : "Numbers and symbols", nil)
+        case .nextKeyboard: return ("Next keyboard", nil)
+        case .diagnostics: return ("Diagnostics", nil)
+        }
+    }
+
     @ViewBuilder
     private func keyView(for positioned: PositionedKey) -> some View {
         if positioned.key.action == .nextKeyboard {
@@ -197,6 +324,9 @@ private struct KeyGrid: View {
             // Drawing only — the touch layer above owns input. Without this SwiftUI competes
             // for the touch and walks its view tree on every touchesMoved for no benefit.
             .allowsHitTesting(false)
+            // TouchTracker publishes one actionable accessibility element per physical key.
+            // Hiding the drawing prevents VoiceOver from encountering an inert duplicate.
+            .accessibilityHidden(true)
         }
     }
 
@@ -217,7 +347,15 @@ private struct KeyFace: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                .fill(fill)
+                .fill(theme.fill(for: key.style))
+
+            // Pressed keys darken rather than fade. The keyboard background is transparent
+            // (iOS 26 glass), so an opacity drop lets the host app bleed through the key —
+            // a dim overlay keeps it opaque and legible in both palettes.
+            if isPressed {
+                RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                    .fill(Color.black.opacity(0.14))
+            }
 
             Text(key.label)
                 .font(labelFont)
@@ -226,8 +364,8 @@ private struct KeyFace: View {
                 .minimumScaleFactor(0.5)
                 .padding(.horizontal, 2)
 
-            // Digit hints on the top row. Long-pressing to insert them is M2 (UI-SPEC.md §5b);
-            // M1 renders the glyphs so the layout already reads like Gboard.
+            // Digit hints on the top row. Long-press inserts them (UI-SPEC.md §5b); their
+            // exact styling remains a Phase 3 comparison against the owner's Gboard reference.
             if let hint = KeyboardLayout.digitHints[key.label.lowercased()], key.style == .letter {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
@@ -242,11 +380,6 @@ private struct KeyFace: View {
                 .padding(.trailing, 4)
             }
         }
-    }
-
-    private var fill: Color {
-        let base = theme.fill(for: key.style)
-        return isPressed ? base.opacity(0.55) : base
     }
 
     private var labelFont: Font {
@@ -285,7 +418,7 @@ private struct CalloutBar: View {
                         if index < callout.options.count {
                             Text(callout.options[index])
                                 .font(.system(size: 19))
-                                .foregroundStyle(index == callout.selectedIndex ? Color.white : theme.keyLabel)
+                                .foregroundStyle(index == callout.selectedIndex ? theme.onAccent : theme.keyLabel)
                                 .frame(width: option.width, height: option.height)
                                 .background(
                                     index == callout.selectedIndex ? theme.accent : Color.clear,
@@ -341,6 +474,7 @@ private struct NextKeyboardButton: UIViewRepresentable {
         button.backgroundColor = UIColor(theme.functionKeyFill)
         button.layer.cornerRadius = KeyboardTheme.keyCornerRadius
         button.layer.cornerCurve = .continuous
+        button.accessibilityLabel = "Next keyboard"
         configure(button)
         return button
     }

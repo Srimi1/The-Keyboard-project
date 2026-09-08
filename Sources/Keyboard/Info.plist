@@ -25,12 +25,12 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>IsASCIICapable</key>
-			<false/>
+			<true/>
 			<key>PrefersRightToLeft</key>
 			<false/>
 			<key>PrimaryLanguage</key>
 			<string>en-US</string>
-			<!-- Full Access. Gates pasteboard, network, haptics, sound, and reliable
+			<!-- Full Access gates shared clipboard persistence, haptics, sound, and reliable
 			     App Group writes (C-05, C-06). The user must still toggle it on in
 			     Settings; this key only makes the toggle appear. -->
 			<key>RequestsOpenAccess</key>

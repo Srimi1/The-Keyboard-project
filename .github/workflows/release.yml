@@ -1,49 +1,81 @@
-name: Release
+name: Draft release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  release:
-    name: Create GitHub Release
-    runs-on: macos-15
-    permissions:
-      contents: write
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  draft:
+    name: Create approved draft
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: public-release
+
     steps:
-      - name: Checkout repository
+      - name: Checkout exact source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Same reason as ci.yml: the project needs Xcode 16+ / Swift 6 syntax, and pinning an
-      # exact version breaks when the runner image rolls forward.
-      - name: Select the newest installed Xcode
+      - name: Validate release request and evidence
+        id: release
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          echo "Using $latest"
-          sudo xcode-select -switch "$latest"
-          xcodebuild -version
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::dispatch this workflow from main"
+            exit 1
+          fi
+          evidence="docs/release-evidence/v$VERSION.md"
+          test -f "$evidence" || {
+            echo "::error::$evidence is required"
+            exit 1
+          }
+          grep -qx 'Release gate: APPROVED' "$evidence" || {
+            echo "::error::release evidence has not been approved"
+            exit 1
+          }
+          grep -q "MARKETING_VERSION: \"$VERSION\"" project.yml || {
+            echo "::error::project.yml MARKETING_VERSION does not match $VERSION"
+            exit 1
+          }
+          sha256sum "$evidence" > release-evidence.sha256
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Upload approved evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ steps.release.outputs.tag }}
+          path: |
+            ${{ steps.release.outputs.evidence }}
+            release-evidence.sha256
 
-      - name: Generate Project
-        run: xcodegen generate
-
-      - name: Verify Build
-        run: |
-          xcodebuild -project KeyboardProject.xcodeproj \
-            -scheme KeyboardProject \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-
-      - name: Create Release
+      - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          draft: false
-          prerelease: false
+          draft: true
+          prerelease: true
+          files: |
+            ${{ steps.release.outputs.evidence }}
+            release-evidence.sha256

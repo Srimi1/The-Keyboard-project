@@ -26,6 +26,13 @@ protocol KeyboardActionHandler: AnyObject {
 @MainActor
 final class KeyboardViewModel: ObservableObject {
 
+    enum Panel: Equatable {
+        case keys
+        case clipboard
+        case settings
+        case diagnostics
+    }
+
     @Published private(set) var layer: KeyboardLayer = .base
     @Published private(set) var shiftState: ShiftState = .off
     @Published private(set) var pressedKeyIDs: Set<String> = []
@@ -34,11 +41,16 @@ final class KeyboardViewModel: ObservableObject {
 
     weak var handler: KeyboardActionHandler?
 
+    let settings: KeyboardSettingsStore
+    /// The clipboard manager owns manual paste transfers, history and the paste chip.
+    let clipboard: ClipboardController
+    /// Exactly one surface can replace the keys at a time.
+    @Published private(set) var panel: Panel = .keys
+
     // The M0 harness is a development tool, not a keyboard feature. Gating the property
     // rather than no-op'ing the calls is what actually keeps `DiagnosticsRunner` and its
     // 1 Hz timer out of the shipping binary.
     #if DEBUG
-    @Published var showDiagnostics = false
     let diagnostics = DiagnosticsRunner()
     #endif
 
@@ -52,6 +64,7 @@ final class KeyboardViewModel: ObservableObject {
         let options: [String]
         /// Columns before wrapping. The punctuation grid is 8 wide; letter callouts are one row.
         let columns: Int
+        let containerWidth: CGFloat
         var selectedIndex: Int
 
         var rows: Int { Int(ceil(Double(options.count) / Double(max(columns, 1)))) }
@@ -62,14 +75,12 @@ final class KeyboardViewModel: ObservableObject {
     private var shift = ShiftController()
     private let repeater = KeyRepeater()
     private var lastSpaceAt: Date?
+    private var lastSpaceContext: String?
 
-    /// Set when double-space just produced ". ", so an immediate backspace can put the two
-    /// spaces back rather than leaving a bare ".".
-    private var revertibleDoubleSpace = false
-
-    private var longPressTask: Task<Void, Never>?
-    /// Accumulated horizontal travel of a finger sliding on the spacebar, in points.
-    private var spaceSlideDistance: CGFloat = 0
+    /// Exact document context after double-space produced ". ". An immediate backspace may
+    /// restore the two spaces only while the caret is still at that exact context. Keeping the
+    /// snapshot prevents a later cursor move or host edit from rewriting unrelated text.
+    private var revertibleDoubleSpaceContext: String?
 
     /// Ordered by press time so rollover commits in the order keys were pressed, not the
     /// order fingers happened to lift.
@@ -78,12 +89,29 @@ final class KeyboardViewModel: ObservableObject {
     private struct ActiveTouch {
         let id: ObjectIdentifier
         let keyID: String
+        /// Action and hit bounds resolved at press time. SwiftUI may not have delivered the
+        /// rerendered layout by release, so consulting a callback's old key array can type the
+        /// wrong case/layer or drop the press entirely.
+        let action: KeyAction
+        let visualRect: CGRect
         var committed: Bool
         /// Where the finger landed, for measuring spacebar slide travel.
         var startLocation: CGPoint
+        /// Per-finger state: another finger landing must not reset a spacebar slide.
+        var spaceSlideDistance: CGFloat = 0
+        var longPressTask: Task<Void, Never>?
         /// Once a finger opens a callout or starts sliding the caret, releasing it must not
         /// also type the key it started on.
         var suppressesKeyOnRelease: Bool = false
+    }
+
+    init(
+        settings: KeyboardSettingsStore = KeyboardSettingsStore(),
+        repository: any ClipboardRepositoryProtocol = ClipboardRepository()
+    ) {
+        self.settings = settings
+        self.clipboard = ClipboardController(repository: repository, settings: settings)
+        feedback.apply(settings.values)
     }
 
     var rows: [KeyRow] {
@@ -113,6 +141,20 @@ final class KeyboardViewModel: ObservableObject {
         shiftState = shift.state
     }
 
+    /// The host calls this when its text or selection changes outside a key action. Preserve the
+    /// double-space rollback only if the proxy still exposes the exact post-transform context.
+    func inputContextDidChange() {
+        clipboard.cancelPendingInsertion()
+        if let expected = revertibleDoubleSpaceContext,
+           handler?.contextBeforeInput != expected {
+            clearDoubleSpaceState()
+        } else if let expected = lastSpaceContext,
+                  handler?.contextBeforeInput != expected {
+            clearDoubleSpaceState()
+        }
+        syncWithTextField()
+    }
+
     // MARK: - Touch handling
 
     func handle(touches: [KeyboardTouch], positionedKeys: [PositionedKey]) {
@@ -133,19 +175,37 @@ final class KeyboardViewModel: ObservableObject {
     private func begin(_ touch: KeyboardTouch, positionedKeys: [PositionedKey]) {
         // UIKit recycles UITouch objects between sequences, so an identity can collide with a
         // stale entry that never saw its ended/cancelled.
-        activeTouches.removeAll { $0.id == touch.id }
+        if let staleIndex = activeTouches.firstIndex(where: { $0.id == touch.id }) {
+            tearDownActiveTouch(at: staleIndex)
+        }
 
-        guard let positioned = KeyboardMetrics.key(at: touch.location, in: positionedKeys) else { return }
+        guard KeyboardMetrics.key(at: touch.location, in: positionedKeys) != nil else { return }
 
         // Rollover: a new finger landing means every key still held has been "typed past",
         // so flush them in press order before registering this one (UI-SPEC §3).
-        commitPendingPresses(positionedKeys: positionedKeys)
+        commitPendingPresses()
+
+        // The committed key may have switched layer or shift state. Rebuild geometry from the
+        // same tiled bounds and hit-test again, so the new finger belongs to the layout now on
+        // screen instead of carrying an obsolete letter/symbol action until release.
+        let layoutSize = CGSize(
+            width: positionedKeys.map(\.hitRect.maxX).max() ?? 0,
+            height: positionedKeys.map(\.hitRect.maxY).max() ?? 0
+        )
+        let currentKeys = KeyboardMetrics.positionedKeys(rows: rows, in: layoutSize)
+        guard let positioned = KeyboardMetrics.key(at: touch.location, in: currentKeys) else { return }
 
         activeTouches.append(
-            ActiveTouch(id: touch.id, keyID: positioned.id, committed: false, startLocation: touch.location)
+            ActiveTouch(
+                id: touch.id,
+                keyID: positioned.id,
+                action: positioned.key.action,
+                visualRect: positioned.rect,
+                committed: false,
+                startLocation: touch.location
+            )
         )
         pressedKeyIDs.insert(positioned.id)
-        spaceSlideDistance = 0
 
         // On press, not release: the tap should feel immediate, the way a real key does.
         feedback.keyPressed()
@@ -153,25 +213,31 @@ final class KeyboardViewModel: ObservableObject {
         // Backspace is the one key that acts on press and repeats while held.
         if positioned.key.action == .backspace {
             markCommitted(touch.id)
-            repeater.start { [weak self] characterCount in
+            repeater.start { [weak self] in
+                self?.perform(.backspace)
+            } repeatFire: { [weak self] characterCount in
                 guard let self, let handler = self.handler else { return }
                 for _ in 0..<characterCount { handler.deleteBackward() }
-                self.revertibleDoubleSpace = false
+                self.clearDoubleSpaceState()
+                self.didEditText()
                 self.syncWithTextField()
             }
             return
         }
 
-        scheduleLongPress(for: positioned, touchID: touch.id)
+        scheduleLongPress(for: positioned, touchID: touch.id, positionedKeys: positionedKeys)
     }
 
     // MARK: - Long press (UI-SPEC §5)
 
-    private func scheduleLongPress(for positioned: PositionedKey, touchID: ObjectIdentifier) {
-        longPressTask?.cancel()
+    private func scheduleLongPress(
+        for positioned: PositionedKey,
+        touchID: ObjectIdentifier,
+        positionedKeys: [PositionedKey]
+    ) {
         guard let options = MoreKeys.options(for: positioned.key, shift: shiftState) else { return }
 
-        longPressTask = Task { [weak self] in
+        let task = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(KeyboardTimings.longPressTimeout * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             // Only open if that same finger is still down and has not been committed by
@@ -183,9 +249,15 @@ final class KeyboardViewModel: ObservableObject {
                 anchor: positioned.rect,
                 options: options,
                 columns: MoreKeys.columns(for: positioned.key, options: options),
+                containerWidth: positionedKeys.map(\.rect.maxX).max() ?? positioned.rect.maxX,
                 selectedIndex: 0
             )
             self.suppressKeyOnRelease(touchID)
+        }
+        if let index = activeTouches.firstIndex(where: { $0.id == touchID }) {
+            activeTouches[index].longPressTask = task
+        } else {
+            task.cancel()
         }
     }
 
@@ -220,7 +292,9 @@ final class KeyboardViewModel: ObservableObject {
         // A keyboard cannot draw above its own top edge, so a callout on the top row sits
         // just below it rather than floating outside (C-45).
         let y = max(0, callout.anchor.minY - height - 2)
-        return CGPoint(x: callout.anchor.midX - width / 2, y: y)
+        let proposedX = callout.anchor.midX - width / 2
+        let x = min(max(0, proposedX), max(0, callout.containerWidth - width))
+        return CGPoint(x: x, y: y)
     }
 
     /// AOSP fills the row nearest the finger first, so resource item 0 is bottom-left.
@@ -240,6 +314,24 @@ final class KeyboardViewModel: ObservableObject {
         guard let index = activeTouches.firstIndex(where: { $0.id == touch.id }) else { return }
         let active = activeTouches[index]
 
+        // Backspace acts on press and is therefore already marked committed, but moving the
+        // finger off it must still stop that finger's repeat stream.
+        if active.keyID == backspaceKeyID {
+            let stillOnKey = active.visualRect
+                .insetBy(dx: -KeyboardTimings.keyHysteresis, dy: -KeyboardTimings.keyHysteresis)
+                .contains(touch.location)
+            if !stillOnKey {
+                pressedKeyIDs.remove(active.keyID)
+                activeTouches.remove(at: index)
+                stopRepeaterIfNoBackspaceTouchesRemain()
+            }
+            return
+        }
+
+        // Rollover can commit a held key before that finger moves again. A committed space
+        // must not continue moving the caret after another key has taken over.
+        guard !active.committed else { return }
+
         // A finger inside an open callout is choosing an accent, not still pressing the key.
         if callout?.keyID == active.keyID {
             updateCalloutSelection(at: touch.location)
@@ -252,17 +344,14 @@ final class KeyboardViewModel: ObservableObject {
             return
         }
 
-        guard !active.committed else { return }
-
         // Hysteresis so a slight drift keeps the key — without it, fast typing drops
         // characters at key edges. Measured from the visual rect (see isStillOnKey).
-        let stillOnKey = positionedKeys
-            .first { $0.id == active.keyID }
-            .map { KeyboardMetrics.isStillOnKey(touch.location, key: $0, hysteresis: KeyboardTimings.keyHysteresis) }
-            ?? false
+        let stillOnKey = active.visualRect
+            .insetBy(dx: -KeyboardTimings.keyHysteresis, dy: -KeyboardTimings.keyHysteresis)
+            .contains(touch.location)
 
         if !stillOnKey {
-            longPressTask?.cancel()
+            activeTouches[index].longPressTask?.cancel()
             pressedKeyIDs.remove(active.keyID)
             activeTouches.remove(at: index)
         }
@@ -276,16 +365,18 @@ final class KeyboardViewModel: ObservableObject {
     /// (C-18), so this cannot run off the end of what we can see.
     private func handleSpaceSlide(_ touch: KeyboardTouch, index: Int) {
         let travel = touch.location.x - activeTouches[index].startLocation.x
-        let steps = Int((travel - spaceSlideDistance) / Self.spaceSlideStep)
+        let steps = Int((travel - activeTouches[index].spaceSlideDistance) / Self.spaceSlideStep)
         guard steps != 0 else { return }
 
-        spaceSlideDistance += CGFloat(steps) * Self.spaceSlideStep
+        activeTouches[index].spaceSlideDistance += CGFloat(steps) * Self.spaceSlideStep
+        clearDoubleSpaceState()
+        clipboard.cancelPendingInsertion()
         handler?.adjustTextPosition(by: steps)
         feedback.selectionChanged()
 
         // Once the caret has moved, releasing must not also insert a space.
         activeTouches[index].suppressesKeyOnRelease = true
-        longPressTask?.cancel()
+        activeTouches[index].longPressTask?.cancel()
         syncWithTextField()
     }
 
@@ -297,44 +388,74 @@ final class KeyboardViewModel: ObservableObject {
         guard let index = activeTouches.firstIndex(where: { $0.id == touch.id }) else { return }
         let active = activeTouches.remove(at: index)
         pressedKeyIDs.remove(active.keyID)
-        longPressTask?.cancel()
+        active.longPressTask?.cancel()
 
         if active.keyID == backspaceKeyID {
-            repeater.stop()
+            stopRepeaterIfNoBackspaceTouchesRemain()
             return
         }
 
         // Releasing inside a callout picks the accent rather than typing the base letter.
         if let callout, callout.keyID == active.keyID {
-            let selection = callout.options[callout.selectedIndex]
-            self.callout = nil
-            handler?.insert(selection)
-            shift.didInsertCharacter()
-            revertibleDoubleSpace = false
-            syncWithTextField()
+            insertCalloutSelection(callout)
             return
         }
 
-        guard !active.committed, !active.suppressesKeyOnRelease,
-              let positioned = positionedKeys.first(where: { $0.id == active.keyID }) else { return }
-        perform(positioned.key.action)
+        guard !active.committed, !active.suppressesKeyOnRelease else { return }
+        perform(active.action)
     }
 
     private func cancel(_ touch: KeyboardTouch) {
         guard let index = activeTouches.firstIndex(where: { $0.id == touch.id }) else { return }
         let active = activeTouches.remove(at: index)
         pressedKeyIDs.remove(active.keyID)
-        if active.keyID == backspaceKeyID { repeater.stop() }
+        active.longPressTask?.cancel()
+        if active.keyID == backspaceKeyID { stopRepeaterIfNoBackspaceTouchesRemain() }
+        if callout?.keyID == active.keyID { callout = nil }
     }
 
-    private func commitPendingPresses(positionedKeys: [PositionedKey]) {
-        for active in activeTouches where !active.committed {
-            guard let positioned = positionedKeys.first(where: { $0.id == active.keyID }) else { continue }
-            perform(positioned.key.action)
+    private func commitPendingPresses() {
+        let pending = activeTouches.filter { !$0.committed }
+        for active in pending {
+            if active.suppressesKeyOnRelease {
+                if let callout, callout.keyID == active.keyID {
+                    insertCalloutSelection(callout)
+                }
+                // A cursor slide suppresses its original space. No other suppressed gesture
+                // should fall through and type its base key during rollover.
+                continue
+            }
+            perform(active.action)
         }
         for index in activeTouches.indices {
+            activeTouches[index].longPressTask?.cancel()
             activeTouches[index].committed = true
         }
+    }
+
+    private func insertCalloutSelection(_ callout: CalloutState) {
+        let selection = callout.options[callout.selectedIndex]
+        self.callout = nil
+        handler?.insert(selection)
+        shift.didInsertCharacter()
+        clearDoubleSpaceState()
+        didEditText()
+        syncWithTextField()
+    }
+
+    private func stopRepeaterIfNoBackspaceTouchesRemain() {
+        guard !activeTouches.contains(where: { $0.keyID == backspaceKeyID }) else { return }
+        repeater.stop()
+    }
+
+    private func tearDownActiveTouch(at index: Int) {
+        let stale = activeTouches.remove(at: index)
+        stale.longPressTask?.cancel()
+        if !activeTouches.contains(where: { $0.keyID == stale.keyID }) {
+            pressedKeyIDs.remove(stale.keyID)
+        }
+        if stale.keyID == backspaceKeyID { stopRepeaterIfNoBackspaceTouchesRemain() }
+        if callout?.keyID == stale.keyID { callout = nil }
     }
 
     private func markCommitted(_ id: ObjectIdentifier) {
@@ -348,24 +469,110 @@ final class KeyboardViewModel: ObservableObject {
     /// or layer changes underneath the touches, since the view is never rebuilt and a
     /// stranded pointer would otherwise stay pressed for the life of the extension.
     func releaseAllTouches() {
+        for active in activeTouches { active.longPressTask?.cancel() }
         activeTouches.removeAll()
         pressedKeyIDs.removeAll()
         repeater.stop()
-        longPressTask?.cancel()
         callout = nil
+    }
+
+    // MARK: - Clipboard
+
+    func toggleClipboard() {
+        showPanel(panel == .clipboard ? .keys : .clipboard)
+    }
+
+    func closeClipboard() {
+        showPanel(.keys)
+    }
+
+    func toggleSettings() {
+        showPanel(panel == .settings ? .keys : .settings)
+    }
+
+    func showPanel(_ destination: Panel) {
+        guard panel != destination else { return }
+        releaseAllTouches()
+        clipboard.cancelPendingInteractions()
+        panel = destination
+        if destination == .clipboard { clipboard.refreshHistory() }
+    }
+
+    func setHapticsEnabled(_ enabled: Bool) {
+        settings.setHapticsEnabled(enabled)
+        feedback.apply(settings.values)
+        if enabled { feedback.prepare() }
+    }
+
+    func setSoundEnabled(_ enabled: Bool) {
+        settings.setSoundEnabled(enabled)
+        feedback.apply(settings.values)
+    }
+
+    func setAppearance(_ appearance: KeyboardAppearance) {
+        settings.setAppearance(appearance)
+    }
+
+    func setClipboardCaptureMode(_ mode: ClipboardCaptureMode) {
+        settings.setClipboardCaptureMode(mode)
+    }
+
+    func acceptClipboardNotice() {
+        settings.acceptClipboardNotice()
+    }
+
+    func activate(hasFullAccess: Bool) {
+        settings.refresh(canUseShared: hasFullAccess)
+        feedback.hasFullAccess = hasFullAccess
+        feedback.apply(settings.values)
+        feedback.prepare()
+        clipboard.activate(.keyboard(hasFullAccess: hasFullAccess))
+        panel = .keys
+        clearDoubleSpaceState()
+    }
+
+    func deactivate() {
+        releaseAllTouches()
+        clipboard.deactivate()
+        panel = .keys
+        clearDoubleSpaceState()
+    }
+
+    /// Tap-to-insert from the panel or the paste chip. The panel stays open afterwards
+    /// (CLIPBOARD.md §5) so several items can be pasted in a row.
+    func insertClipboardText(_ text: String) {
+        guard let handler else { return }
+        clearDoubleSpaceState()
+        handler.insert(text)
+        shift.didInsertCharacter()
+        didEditText()
+        feedback.keyPressed()
+        syncAfterEdit()
+    }
+
+    func insertClipboardItem(_ item: ClipboardItem) {
+        // Strip actions live above the touch surface and can arrive while a key is held. Commit
+        // older presses first, then stop repeat/gesture state so paste ordering is deterministic.
+        commitPendingPresses()
+        releaseAllTouches()
+        clipboard.resolveTextForInsertion(id: item.id) { [weak self] text in
+            self?.insertClipboardText(text)
+        }
     }
 
     // MARK: - Actions
 
     func perform(_ action: KeyAction) {
         guard let handler else { return }
+        clipboard.cancelPendingInsertion()
+        if action != .shift { shift.cancelTapSequence() }
 
         switch action {
         case .character(let text):
             handler.insert(text)
             shift.didInsertCharacter()
-            lastSpaceAt = nil
-            revertibleDoubleSpace = false
+            clearDoubleSpaceState()
+            didEditText()
             syncAfterEdit()
 
         case .space:
@@ -373,21 +580,23 @@ final class KeyboardViewModel: ObservableObject {
 
         case .newline:
             handler.insert("\n")
-            lastSpaceAt = nil
+            clearDoubleSpaceState()
+            didEditText()
             syncAfterEdit()
 
         case .backspace:
             // Backspace straight after double-space put a period in restores the two spaces,
             // rather than leaving a bare "." the user never asked for.
-            if revertibleDoubleSpace {
+            if let expected = revertibleDoubleSpaceContext,
+               handler.contextBeforeInput == expected {
                 handler.deleteBackward()   // the space
                 handler.deleteBackward()   // the period
                 handler.insert("  ")
-                revertibleDoubleSpace = false
             } else {
                 handler.deleteBackward()
             }
-            lastSpaceAt = nil
+            clearDoubleSpaceState()
+            didEditText()
             syncAfterEdit()
 
         case .shift:
@@ -407,8 +616,8 @@ final class KeyboardViewModel: ObservableObject {
             // The key exists in `KeyAction` so the switch stays exhaustive; nothing can
             // reach it in Release, where the button that sends it is compiled out.
             #if DEBUG
-            showDiagnostics.toggle()
-            if showDiagnostics {
+            showPanel(panel == .diagnostics ? .keys : .diagnostics)
+            if panel == .diagnostics {
                 diagnostics.runSafeProbes(hasFullAccess: handler.hasFullAccess)
             }
             #endif
@@ -422,18 +631,21 @@ final class KeyboardViewModel: ObservableObject {
 
         if let last = lastSpaceAt,
            now.timeIntervalSince(last) <= KeyboardTimings.doubleSpacePeriodTimeout,
+           handler.contextBeforeInput == lastSpaceContext,
            canConvertDoubleSpaceToPeriod(context: handler.contextBeforeInput) {
             handler.deleteBackward()      // remove the first space
             handler.insert(". ")
             lastSpaceAt = nil
-            revertibleDoubleSpace = true
+            revertibleDoubleSpaceContext = handler.contextBeforeInput
         } else {
             handler.insert(" ")
             lastSpaceAt = now
-            revertibleDoubleSpace = false
+            lastSpaceContext = handler.contextBeforeInput
+            revertibleDoubleSpaceContext = nil
         }
 
         shift.didInsertCharacter()
+        didEditText()
         syncAfterEdit()
     }
 
@@ -449,5 +661,15 @@ final class KeyboardViewModel: ObservableObject {
 
     private func syncAfterEdit() {
         syncWithTextField()
+    }
+
+    private func clearDoubleSpaceState() {
+        lastSpaceAt = nil
+        lastSpaceContext = nil
+        revertibleDoubleSpaceContext = nil
+    }
+
+    private func didEditText() {
+        clipboard.userDidType()
     }
 }

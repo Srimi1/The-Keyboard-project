@@ -107,15 +107,15 @@ final class HostDiagnostics: ObservableObject {
     /// Step 2 — Full Access, as reported by the extension itself (C-06).
     var fullAccessStatus: StepStatus {
         guard let value = handshake?.hasFullAccess else { return .unknown }
-        return value ? .done : .failed
+        return value ? .done : .unknown
     }
 
     /// Step 3 — no API exposes this setting.
     ///
     /// Deciding it needs a pasteboard **value** read, which is the one call that can fire the
-    /// system paste alert (C-14). A shipping build has no business making that call before
-    /// M3's capture pipeline needs the value anyway, so outside Debug this stays an
-    /// instruction rather than a verdict.
+    /// system paste alert (C-14). A shipping build never performs a diagnostic value read;
+    /// explicit `PasteButton` actions provide values only while fulfilling a save, so outside
+    /// Debug this stays an instruction rather than a verdict.
     var pasteWithoutPromptStatus: StepStatus {
         #if DEBUG
         guard let probe = keyboardReport?.pasteboard else { return .unknown }

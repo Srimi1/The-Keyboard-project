@@ -7,9 +7,9 @@ import Foundation
 // metrics. See UI-SPEC.md §1. Letter keys 10%, shift/backspace 15%, bottom row
 // [?123 15%][, 10%][space 50%][. 10%][return 15%].
 //
-// M0 SCOPE: structure and widths only. Heights, gaps, corner radii and exact colors
-// are 📐 MEASURE items in UI-SPEC.md §12, blocked on reference screenshots, and the
-// placeholder values in KeyboardTheme are explicitly not verified.
+// The structure and widths are implemented. Heights, gaps, corner radii and exact colors
+// remain 📐 MEASURE items in UI-SPEC.md §12 and require the owner's reference screenshots
+// before Phase 3 visual acceptance.
 
 enum KeyboardLayer: Equatable {
     case base
@@ -57,7 +57,10 @@ struct Key: Identifiable, Equatable {
     }
 
     static func letter(_ character: String) -> Key {
-        Key(id: "key-\(character)", label: character, action: .character(character))
+        // Identity describes the physical key, not its current shifted label. If the ID
+        // changes from key-a to key-A while two fingers are held, the second release cannot
+        // find its original key after the first character drops shift and rerenders.
+        Key(id: "key-\(character.lowercased())", label: character, action: .character(character))
     }
 }
 
@@ -111,8 +114,8 @@ enum KeyboardLayout {
     private static let homeLetters = ["a", "s", "d", "f", "g", "h", "j", "k", "l"]
     private static let bottomLetters = ["z", "x", "c", "v", "b", "n", "m"]
 
-    /// Digit hints shown on the top row. Long-press to insert them is M2 work
-    /// (UI-SPEC.md §5b); M0 renders the glyphs only.
+    /// Digit hints shown on the top row. Long-press inserts them (UI-SPEC.md §5b);
+    /// their exact size, position and opacity remain a Phase 3 visual gate.
     static let digitHints: [String: String] = [
         "q": "1", "w": "2", "e": "3", "r": "4", "t": "5",
         "y": "6", "u": "7", "i": "8", "o": "9", "p": "0",
@@ -136,7 +139,7 @@ enum KeyboardLayout {
     //
     // 📐 MEASURE: the exact contents and arrangement of Gboard's ?123 and =\< layers are
     // UI-SPEC.md item V-03, blocked on reference screenshots. These are a working set for
-    // M0 typing, not a verified match.
+    // functional typing, not a verified visual/arrangement match.
 
     private static func symbolRows() -> [KeyRow] {
         [
@@ -176,8 +179,8 @@ enum KeyboardLayout {
             Key(id: "key-layer", label: layerKeyLabel, action: .switchLayer(target), widthFraction: 0.15, style: .function)
         ]
 
-        // When iOS requires a globe key it takes the comma's slot, and the comma moves into
-        // the period's long-press set — which does not exist until M2 (UI-SPEC.md §1, §5c).
+        // When iOS requires a globe key it takes the comma's slot; comma remains available
+        // in the period's implemented long-press set (UI-SPEC.md §1, §5c).
         if needsGlobe {
             keys.append(Key(id: "key-globe", label: "🌐", action: .nextKeyboard, style: .function))
         } else {

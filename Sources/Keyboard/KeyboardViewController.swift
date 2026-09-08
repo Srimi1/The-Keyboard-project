@@ -13,6 +13,10 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - Lifecycle
 
+    override func loadView() {
+        view = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -33,10 +37,9 @@ final class KeyboardViewController: UIInputViewController {
         // keep the live value in the strip for exactly that reason.
         model.needsGlobe = needsInputModeSwitchKey
 
-        // Read here rather than in viewDidLoad: before the host connection exists the value
-        // is unreliable, and there is no notification when it changes (C-41).
-        model.feedback.hasFullAccess = hasFullAccess
-        model.feedback.prepare()
+        // Re-read access and persisted local preferences on each appearance. Typing itself is
+        // independent of Full Access; only shared clipboard persistence and feedback degrade.
+        model.activate(hasFullAccess: hasFullAccess)
 
         // The one thing a shipping keyboard tells the host app: that it ran, and whether
         // Full Access is on — the host app cannot read either for itself (C-06). Throttled
@@ -55,12 +58,12 @@ final class KeyboardViewController: UIInputViewController {
     /// notification, so re-read the traits and the auto-capitalization state each time.
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        model.syncWithTextField()
+        model.inputContextDidChange()
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        model.syncWithTextField()
+        model.inputContextDidChange()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -72,16 +75,10 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        model.deactivate()
         #if DEBUG
         model.diagnostics.stopMemoryMonitor()
         #endif
-    }
-
-    deinit {
-        // Each host app instantiates a fresh controller whose view is retained after
-        // dismissal, so per-appearance allocations accumulate (C-02).
-        hostingController?.view.removeFromSuperview()
-        hostingController?.removeFromParent()
     }
 
     // MARK: - Setup
@@ -147,6 +144,7 @@ final class KeyboardViewController: UIInputViewController {
     /// after the first layout, and rotation changes it again.
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
+        model.releaseAllTouches()
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
             self?.applyKeyboardHeight()
         }
@@ -160,21 +158,9 @@ final class KeyboardViewController: UIInputViewController {
 
 // MARK: - Audio feedback
 
-/// `UIDevice.playInputClick()` plays nothing unless the **on-screen input view** adopts this
-/// and returns true.
-///
-/// The object iOS consults is the system-vended `UIInputView` (`self.inputView`), not the view
-/// controller — Apple's docs are explicit that the conformance belongs on the `UIView`
-/// subclass. Adopting it only on the controller is a silent no-op that looks exactly like
-/// "Full Access is off", which is how it could hide behind Q-03 indefinitely.
-///
-/// `@retroactive` is required because both the class and the protocol come from UIKit.
-extension UIInputView: @retroactive UIInputViewAudioFeedback {
-    public var enableInputClicksWhenVisible: Bool { true }
-}
-
-/// Kept as well — it costs nothing, and the controller conformance is the widely-used form.
-extension KeyboardViewController: UIInputViewAudioFeedback {
+/// A project-owned input view avoids globally retroactively conforming UIKit's class, which
+/// could collide with a future SDK conformance.
+private final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
     var enableInputClicksWhenVisible: Bool { true }
 }
 

@@ -9,8 +9,8 @@ import UIKit
 /// Renders the real keyboard inside the host app, typing into a local buffer instead of a
 /// text field.
 ///
-/// This exists for the M1 and M2 exit criteria, which are both "compare side by side against
-/// the Gboard reference screenshots". Putting the keyboard on screen next to a reference
+/// This exists for the Phase 3 visual gate: compare side by side against the owner's Gboard
+/// reference screenshots. Putting the keyboard on screen next to a reference
 /// image beats switching keyboards in another app and screenshotting from there — and it
 /// works before the extension is even installed.
 ///
@@ -34,15 +34,27 @@ struct KeyboardPreviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.handler = handler
+            // Mirror a live extension appearance, but the clipboard remains manual-first.
+            model.activate(hasFullAccess: handler.hasFullAccess)
             model.syncWithTextField()
             // The host app's footprint, not the extension's — the number that counts against
             // the 40 MB budget is the one the keyboard reports when running inside another
             // app. This is here so the bar reads honestly rather than showing 0.0 MB.
+            // The preview drives the same clipboard the extension does, so the panel, the
+            // paste chip and explicit clipboard save flow can all be exercised here rather than
+            // only on a device with the keyboard installed.
+            // Lets the clipboard panel be captured without a tap, the same way
+            // `-keyboardPreview` scripts the keyboard itself:
+            //     xcrun simctl launch <device> com.srijan.keyboardproject -keyboardPreview -clipboardPanel
+            if ProcessInfo.processInfo.arguments.contains("-clipboardPanel") {
+                model.showPanel(.clipboard)
+            }
             #if DEBUG
             model.diagnostics.startMemoryMonitor()
             #endif
         }
         .onDisappear {
+            model.deactivate()
             #if DEBUG
             model.diagnostics.stopMemoryMonitor()
             #endif

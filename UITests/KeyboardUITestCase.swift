@@ -2,16 +2,15 @@ import XCTest
 
 /// Base class for the touch-level keyboard tests.
 ///
-/// The keys are not buttons. `KeyGrid` draws them as rects and puts a raw UIKit
-/// `MultiTouchView` on top (TouchTracker.swift), and every key face is explicitly
-/// `.allowsHitTesting(false)`. So there is nothing for XCUITest to "tap" by identity —
-/// every press here is a coordinate press, computed from the same percentage layout
-/// `KeyboardMetrics` uses to place and hit-test the keys.
+/// The keys are drawn rects under a raw UIKit `MultiTouchView` (TouchTracker.swift).
+/// Actionable accessibility elements exist for VoiceOver, while touch-behavior trials use
+/// coordinates computed from the same percentage layout as production hit-testing.
 ///
 /// The tests drive the **host app**, which compiles `Sources/Keyboard` in and renders the
 /// real `KeyboardRootView` via `KeyboardPreviewView`. That is the real keyboard code;
 /// what it is *not* is the extension process — no `UITextDocumentProxy`, no real
 /// `hasFullAccess`, no haptics, no globe key, no jetsam limit.
+@MainActor
 class KeyboardUITestCase: XCTestCase {
 
     var app: XCUIApplication!
@@ -29,7 +28,10 @@ class KeyboardUITestCase: XCTestCase {
     static let keySpacing: CGFloat = 3
     static let rowSpacing: CGFloat = 6
     static let keyboardVerticalPadding: CGFloat = 6
-    static let statusBarHeight: CGFloat = 28
+    /// Mirror of `KeyboardTheme.stripHeight`. Currently unused — `calibrateGeometry()` reads
+    /// the key area off the drawn labels instead — but kept in step so the documented
+    /// fallback path stays correct if it is ever needed.
+    static let stripHeight: CGFloat = 44
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -75,9 +77,9 @@ class KeyboardUITestCase: XCTestCase {
 
     /// Works out where the key grid actually is.
     ///
-    /// SwiftUI still publishes each key's `Text` label as an accessibility element even
-    /// though the face is `.allowsHitTesting(false)`, so the drawn rects can be read off the
-    /// screen rather than guessed. Labels are matched case-insensitively because the
+    /// TouchTracker publishes each key's complete hit frame as an accessibility element, so
+    /// the row geometry can be read off the screen rather than guessed. Labels are matched
+    /// case-insensitively because the
     /// keyboard opens with shift raised (auto-capitalization on an empty field), so the caps
     /// on screen read "Q", not "q".
     ///
@@ -120,10 +122,12 @@ class KeyboardUITestCase: XCTestCase {
     /// A drawn key label, matched case-insensitively and scoped away from the typed-text pane
     /// (which would otherwise match once the same character has been typed).
     func labelElement(_ label: String) -> XCUIElement {
-        let predicate = NSPredicate(format: "label ==[c] %@", label)
-        let matches = app.staticTexts.matching(predicate).allElementsBoundByIndex
-        // Key labels live below the status strip; the typed-text pane is above it.
-        return matches.first { $0.frame.minY > 500 } ?? app.staticTexts.matching(predicate).firstMatch
+        let predicate = NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label ==[c] %@",
+            "keyboard.key-",
+            label
+        )
+        return app.descendants(matching: .any).matching(predicate).firstMatch
     }
 
     // MARK: - Reading the screen

@@ -8,13 +8,75 @@ import UIKit
 /// keyboard's own report, memory readings — is Debug-only and sits at the bottom.
 struct RootView: View {
     @StateObject private var diagnostics = HostDiagnostics()
+    @StateObject private var settings: KeyboardSettingsStore
+    @StateObject private var clipboard: ClipboardController
     @Environment(\.scenePhase) private var scenePhase
     @State private var scratchText = ""
+    private let testingClipboardText: String?
+    private let testingNow: Date?
+
+    init() {
+        #if DEBUG
+        let process = ProcessInfo.processInfo
+        let isUITest = process.arguments.contains("-uiTesting")
+        let testID = isUITest
+            ? process.environment["KB_UI_STORE_ID"].flatMap(UUID.init(uuidString:))
+            : nil
+        let testText = isUITest ? process.environment["KB_UI_CLIPBOARD_TEXT"] : nil
+        let testNow = process.environment["KB_UI_NOW"]
+            .flatMap(TimeInterval.init)
+            .map { Date(timeIntervalSince1970: $0) }
+
+        let settings: KeyboardSettingsStore
+        let repository: ClipboardRepository
+        if let testID {
+            let suitePrefix = "com.srijan.keyboardproject.uitests.\(testID.uuidString)"
+            let local = UserDefaults(suiteName: suitePrefix + ".local") ?? .standard
+            let shared = UserDefaults(suiteName: suitePrefix + ".shared")
+            settings = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("KeyboardProjectUITests", isDirectory: true)
+                .appendingPathComponent(testID.uuidString, isDirectory: true)
+            repository = ClipboardRepository(
+                fileURL: directory.appendingPathComponent(ClipboardRepository.fileName)
+            )
+        } else {
+            settings = KeyboardSettingsStore()
+            repository = ClipboardRepository()
+        }
+        _settings = StateObject(wrappedValue: settings)
+        let clock: @Sendable () -> Date
+        if let testNow {
+            clock = { testNow }
+        } else {
+            clock = { Date() }
+        }
+        _clipboard = StateObject(wrappedValue: ClipboardController(
+            repository: repository,
+            settings: settings,
+            now: clock
+        ))
+        testingClipboardText = testText.map { ClipboardLimits.truncate($0).text }
+        testingNow = testNow
+        #else
+        let settings = KeyboardSettingsStore()
+        _settings = StateObject(wrappedValue: settings)
+        _clipboard = StateObject(wrappedValue: ClipboardController(
+            repository: ClipboardRepository(),
+            settings: settings,
+            now: { Date() }
+        ))
+        testingClipboardText = nil
+        testingNow = nil
+        #endif
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 setupSection
+                settingsSection
+                clipboardSection
                 #if DEBUG
                 previewSection
                 #endif
@@ -28,15 +90,40 @@ struct RootView: View {
             }
             .navigationTitle("Keyboard Project")
         }
-        .onAppear { diagnostics.refresh() }
+        .onAppear {
+            diagnostics.refresh()
+            settings.refresh(canUseShared: true)
+            clipboard.activate(.hostApp)
+        }
         // Explicit `perform:` selects the single-value overload; the zero- and
         // two-parameter forms of onChange are iOS 17+.
         .onChange(of: scenePhase, perform: { phase in
             // Coming back from Settings is the moment a step most often flips to done, so
-            // this is what makes the checklist feel live. It is also one of the three
-            // clipboard capture triggers once M3 lands (ARCHITECTURE.md §5).
-            if phase == .active { diagnostics.refresh() }
+            // this is what makes the checklist feel live. Clipboard reads remain tied only
+            // to an explicit PasteButton action, never to this lifecycle callback.
+            if phase == .active {
+                diagnostics.refresh()
+                settings.refresh(canUseShared: true)
+                clipboard.activate(.hostApp)
+            } else if phase == .background {
+                // A system Paste permission sheet temporarily makes the app inactive. The
+                // provider transfer must survive that transition; only a real backgrounding
+                // ends the controller lifetime.
+                clipboard.deactivate()
+            }
         })
+        // Clipboard text must not appear in an app-switcher snapshot.
+        .overlay {
+            if scenePhase != .active {
+                ZStack {
+                    Color(uiColor: .systemBackground).ignoresSafeArea()
+                    Label("Keyboard Project", systemImage: "keyboard")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityHidden(true)
+            }
+        }
     }
 
     // MARK: - Setup — the reason this app exists
@@ -53,23 +140,12 @@ struct RootView: View {
             )
             step(
                 number: 2,
-                title: "Allow Full Access",
-                detail: "Settings → General → Keyboard → Keyboards → Keyboard Project → Allow Full Access. Needed for the clipboard, haptics and key sound.",
+                title: "Optional: Allow Full Access",
+                detail: "Settings → General → Keyboard → Keyboards → Keyboard Project → Allow Full Access. Typing works without it; shared clipboard history and feedback need it.",
                 status: diagnostics.fullAccessStatus,
                 doneNote: "Reported enabled by the keyboard itself.",
                 pendingNote: nil
             )
-            step(
-                number: 3,
-                title: "Paste from Other Apps → Allow",
-                detail: "Settings → Keyboard Project → Paste from Other Apps → Allow. Without it every clipboard capture fires a system prompt.",
-                status: diagnostics.pasteWithoutPromptStatus,
-                doneNote: "The keyboard's pasteboard read returned without a prompt.",
-                // Confirming this needs a pasteboard value read, which is the call that can
-                // prompt (C-14) — so it is not checked until the clipboard actually uses it.
-                pendingNote: "Set this now; it is confirmed once the clipboard starts using it."
-            )
-
             // Not force-unwrapped: `openSettingsURLString` is a system constant that has
             // always parsed, but a crash on the setup screen is a poor trade for one `!`.
             if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
@@ -82,7 +158,7 @@ struct RootView: View {
         } footer: {
             // Honest about the limit: there is no public deep link to the Keyboards list, and
             // launching Settings is the only app a keyboard may open at all (C-30, 4.4.1).
-            Text("The button opens this app's own Settings page, where Full Access and Paste from Other Apps live. Step 1 is on the Keyboards screen and has to be reached by hand.\n\nAfter setup, switch to the keyboard with the globe key — you never need to open this app again.")
+            Text("The button opens this app's Settings page. Adding the keyboard still has to be done from the Keyboards screen. After setup, switch with the globe key.")
         }
     }
 
@@ -106,6 +182,47 @@ struct RootView: View {
         }
     }
     #endif
+
+    // MARK: - Clipboard
+
+    private var settingsSection: some View {
+        Section {
+            NavigationLink {
+                KeyboardSettingsView(settings: settings, clipboard: clipboard)
+            } label: {
+                Label("Keyboard settings", systemImage: "gearshape")
+            }
+        }
+    }
+
+    private var clipboardSection: some View {
+        Section {
+            NavigationLink {
+                ClipboardHistoryView(
+                    clipboard: clipboard,
+                    settings: settings,
+                    testingClipboardText: testingClipboardText,
+                    testingNow: testingNow
+                )
+            } label: {
+                HStack {
+                    Label("Clipboard history", systemImage: "doc.on.clipboard")
+                    Spacer()
+                    Text(clipboardCountLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text("Clipboard history is manual-first and stays on this phone. Save text from here or from the keyboard's clipboard panel.")
+        }
+    }
+
+    private var clipboardCountLabel: String {
+        let visible = clipboard.history.visible(at: Date())
+        let total = visible.pinned.count + visible.recent.count
+        return total == 0 ? "empty" : "\(total)"
+    }
 
     // MARK: - Signing expiry (C-23)
 
@@ -174,6 +291,12 @@ struct RootView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 2)
+
+            NavigationLink {
+                PrivacyPolicyView()
+            } label: {
+                Label("Privacy policy", systemImage: "hand.raised.fill")
+            }
         } header: {
             Text("Privacy")
         }
@@ -186,6 +309,11 @@ struct RootView: View {
             labeled("Version", "\(AppInfo.version) (\(AppInfo.build))")
             if let seen = diagnostics.keyboardLastSeen {
                 labeled("Keyboard last used", seen.formatted(date: .abbreviated, time: .shortened))
+            }
+            NavigationLink {
+                SupportView()
+            } label: {
+                Label("Help and support", systemImage: "questionmark.circle")
             }
         }
     }

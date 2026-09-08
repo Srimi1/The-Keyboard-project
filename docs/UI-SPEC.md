@@ -38,7 +38,7 @@ All widths are **percentages of keyboard width**, which is how AOSP defines them
 Sourced: AOSP LatinIME `row_qwerty4.xml` — letter keys 10%, shift/delete 15%, symbols key 15%, comma 10%, spacebar starting at x=25% (~50% wide), period 10%, enter filling the right (~15%).
 `Source:` https://android.googlesource.com/platform/packages/inputmethods/LatinIME/+/refs/heads/main/java/res/xml/row_qwerty4.xml
 
-**Globe key insertion.** Show a globe key **only when `needsInputModeSwitchKey` is true** (C-21) — it is *false* on Face ID iPhones, where iOS draws globe/dictation below the keyboard. When true, it takes the comma's slot and the comma moves into the period's long-press set. 📐 MEASURE how this reflows on a Touch ID device if one is ever a target.
+**Globe key insertion.** Show a globe key **only when `needsInputModeSwitchKey` is true** (C-21). Do not infer that value from the device class: it measured `true` on an iPhone 14 with iOS 26.5, while verification on the current target iPhone remains open. When true, it takes the comma's slot and the comma moves into the period's long-press set. 📐 MEASURE every supported device/OS combination.
 
 **📐 MEASURE list for §1:** exact key **heights** per row, **horizontal/vertical gaps** between keys, **corner radius**, keyboard **total height** per device class, and whether Gboard's spacebar is exactly 50% or slightly different in its current build.
 
@@ -54,7 +54,7 @@ Five layers. Layer-switch keys always occupy the `?123` slot position.
 | **symbols `?123`** | tap `?123` | `ABC` | digits row + common punctuation |
 | **extended `=\<`** | tap `=\<` inside symbols | `ABC` | maths/currency/rare symbols |
 
-**📐 MEASURE:** the exact key contents and arrangement of the `?123` and `=\<` layers in current Gboard, and which layer the `=\<` key sits in. Capture both layers as screenshots at M0.
+**📐 MEASURE:** the exact key contents and arrangement of the `?123` and `=\<` layers in current Gboard, and which layer the `=\<` key sits in. Capture both layers before Phase 3 owner acceptance.
 
 ## 3. Key states & touch behavior
 
@@ -109,9 +109,11 @@ This is a v1 requirement — it's how Gboard users type numbers without a number
   - Top row: `' @ : - " + % &`
 
   This supersedes the earlier press-coverage guess (`& % + # ! @ ? ( )`), which had both the wrong membership and no ordering. 📐 Cell size, spacing, and corner radius still need a device screenshot — V-06 in §12 now covers styling only.
-- **Comma `,`** → a **mini-popup**: drag to a **settings gear** (opens our host app's settings) and a one-handed icon (one-handed mode is deferred — v1 shows the gear only, or greys the second slot; 📐 MEASURE which reads better against the reference).
-  `Source:` Google's own help text — "touch and hold the comma, then drag your finger to Settings."
-- **Spacebar** → language switch on Android. English-only in v1 (ADR-002), so v1 shows nothing or a no-op. 📐 Decide at M2; do not invent a different function for this gesture — a wrong action is worse than no action.
+- **Comma `,`** → no special long-press action in v1. Keyboard preferences are available
+  from the dedicated settings button in the toolbar. The extension never attempts to launch
+  the host app; one-handed mode remains deferred. The Gboard comma popup remains a visual
+  reference for a later, policy-compliant interaction.
+- **Spacebar long-press** → language switch on Android. English-only in v1 (ADR-002), so v1 has no separate long-press action. Horizontal sliding remains cursor movement (§6).
 
 ## 6. Gestures
 
@@ -119,35 +121,26 @@ This is a v1 requirement — it's how Gboard users type numbers without a number
 |---|---|---|
 | **Spacebar slide L/R** | Moves the text cursor one character per threshold crossed, via `adjustTextPosition(byCharacterOffset:)` | Gboard-iOS does left/right only (no up/down). 📐 MEASURE the pixel threshold per character step and whether it accelerates. |
 | **Double-space** | Inserts `. ` (period + space), replacing the first space | 📐 MEASURE the timing window. Immediate backspace must revert to two spaces. |
-| **Backspace hold** | Deletes character-by-character, then accelerates | 📐 MEASURE initial delay, repeat interval, and the acceleration curve — Gboard eventually deletes whole words. |
+| **Backspace hold** | Deletes character-by-character, then accelerates to two characters per repeat | 📐 MEASURE initial delay, repeat interval, and the acceleration curve. Word-level gesture deletion remains deferred. |
 | **Slide-off any key** | Cancels the keypress | §3 |
 | **Backspace slide-left** | *(gesture delete — deferred, ADR-007)* | Do not implement in v1 |
 | **Glide typing** | *(deferred to v2, ADR-007)* | Do not implement in v1 |
 
-## 7. Suggestion strip & toolbar
+## 7. Toolbar
 
-> **Status (2026-08-22):** the strip exists as **reserved space and renders nothing** until M4
-> builds the two states below. It is not collapsed to zero on purpose — the keyboard's total
-> height is derived from it (`KeyboardMetrics.preferredKeyboardHeight`), so removing it would
-> change every key proportion measured so far and would have to be undone at M4. Debug builds
-> use the same band for the development readout. Its height (`KeyboardTheme.stripHeight`, 28 pt)
-> is a working value, not a measured one — see V-09.
+The 44-point strip above the keys is active in v1. It contains two fixed controls:
+**clipboard** and **settings**. It has no customization or expansion panel. Debug builds may
+also show development diagnostics; those controls compile out of Release.
 
-The strip above the keys has **two states**:
+After an explicit, successful **Save current clipboard** action, a pill-shaped paste chip
+shows a shortened preview. Tapping it inserts the saved text if it is still valid. Typing,
+moving the cursor, changing panels, revoking Full Access or dismissing the keyboard cancels a
+pending insertion and/or dismisses the chip as appropriate. Opening or foregrounding the app
+or keyboard never detects or reads clipboard values.
 
-**Typing state — 3 candidate slots**
-```
-│   literal / alt   │  ▸ autocorrect ◂  │   alternative   │
-```
-- The **middle slot is the autocorrect choice** — what gets applied when you press space.
-- The **literal typed string is always reachable** in one of the three slots (ADR-009). Never leave the user unable to keep what they actually typed.
-- 📐 MEASURE: strip height, candidate font size/weight, whether the middle candidate is visually emphasized, and the separators between slots.
-
-**Idle state — toolbar**
-
-Gboard-Android's current toolbar has a 2×2 grid button expanding a shortcuts panel plus six drag-customizable slots. **v1 simplifies to two fixed slots** (PRODUCT.md §4): **clipboard** and **settings**. No customization, no expansion panel.
-
-**Paste chip.** After a fresh copy is detected, a **pill-shaped chip** showing a preview of the copied text appears in the strip; tapping it inserts the text. See [CLIPBOARD.md](CLIPBOARD.md) §6 for appearance and dismissal rules.
+A three-candidate suggestions/autocorrect state is post-v1 work (ADR-014). Its eventual
+design must always leave the literal typed text reachable, but it is not part of the current
+release contract.
 
 ## 8. Clipboard panel
 
@@ -168,13 +161,15 @@ The clipboard button replaces the **key area** (not the whole keyboard) with the
 └─────────────────────────────────────┘
 ```
 
-**Required states:** populated, **empty** ("Copy something and it'll show up here"), and **no Full Access** — which must explain the situation and link to the host app, never just show an empty box (C-05, ADR-005). Full behavior in [CLIPBOARD.md](CLIPBOARD.md).
+**Required states:** populated, **empty** ("Save text to keep it here"), and **no Full
+Access**. The unavailable state explains how to enable access in Settings without attempting
+to launch the host app. Full behavior is in [CLIPBOARD.md](CLIPBOARD.md).
 
 📐 MEASURE the Gboard panel's cell size, columns, section headers, and scrolling behavior.
 
 ## 9. Theming
 
-**Starting palettes — derived from Google's Material palette; 📐 MEASURE against screenshots and correct before M2 exit.**
+**Starting palettes — derived from Google's Material palette; 📐 MEASURE against screenshots and correct before Phase 3 owner acceptance.**
 
 | Element | Light | Dark |
 |---|---|---|
@@ -205,28 +200,28 @@ Both haptics and sound **no-op without Full Access** (C-07, C-08) — feature-ga
 
 Set via a height `NSLayoutConstraint` on the input view; width is always system-set (C-22).
 
-**Known constraint:** the constraint only takes effect after first draw, and wrong-initial-height / resize flicker persists into iOS 18/26 (view sized 0×0 → fullscreen → settling). Mitigation is chosen and recorded at M2; until then this is an open implementation question, not a solved one.
+**Known constraint:** the constraint only takes effect after first draw, and wrong-initial-height / resize flicker persists into iOS 18/26 (view sized 0×0 → fullscreen → settling). The current implementation applies a priority-999 height constraint after first draw and recalculates after layout/rotation. Phase 3 must still verify the result on each target; code inspection does not close the visual/flicker gate.
 
 📐 MEASURE Gboard-Android's height as a fraction of screen height on a comparable device, and pick the iPhone equivalent that preserves key aspect ratio.
 
 ## 12. Open visual questions (the 📐 MEASURE backlog)
 
-Capture these from a real Android device at **M0** — reference screenshots are an M0 deliverable, and every item below is blocked until they exist.
+Capture these from the owner's real Android Gboard setup before **Phase 3 owner acceptance**. Until they are supplied and compared, the candidate can be functionally tested but its visual match is not approved.
 
 | # | What to capture | Needed by |
 |---|---|---|
-| V-01 | Full keyboard, light + dark, both key-border settings | M1 |
-| V-02 | Exact key heights, gaps, corner radii (measured in pixels, with device DPI noted) | M1 |
-| V-03 | `?123` and `=\<` layers, complete | M1 |
-| V-04 | Key-preview popup mid-press (size, offset, radius) | M1 |
-| V-05 | Accent callout row open on `e`, `a`, `o` — **sets sourced from AOSP (2026-08-21); this now confirms callout styling only** | M2 |
-| V-06 | Period long-press grid — **contents and ordering sourced from AOSP (2026-08-21); this now confirms cell size/spacing/corner radius only** | M2 |
-| V-07 | Comma long-press mini-popup | M2 |
-| V-08 | Top-row digit hint glyphs (size, position, opacity) | M1 |
-| V-09 | Suggestion strip mid-typing (3 candidates, emphasis) and idle toolbar | M4 |
-| V-10 | Clipboard panel: populated, empty, with pinned items | M3 |
-| V-11 | Keyboard total height vs. screen, portrait | M1 |
+| V-01 | Full keyboard, light + dark, both key-border settings | Phase 3 |
+| V-02 | Exact key heights, gaps, corner radii (measured in pixels, with device DPI noted) | Phase 3 |
+| V-03 | `?123` and `=\<` layers, complete | Phase 3 |
+| V-04 | Key-preview popup mid-press (size, offset, radius) | Phase 3 |
+| V-05 | Accent callout row open on `e`, `a`, `o` — **sets sourced from AOSP (2026-08-21); this now confirms callout styling only** | Phase 3 |
+| V-06 | Period long-press grid — **contents and ordering sourced from AOSP (2026-08-21); this now confirms cell size/spacing/corner radius only** | Phase 3 |
+| V-07 | Comma-key geometry; long-press popup is deferred | Post-v1 |
+| V-08 | Top-row digit hint glyphs (size, position, opacity) | Phase 3 |
+| V-09 | v1 clipboard/settings toolbar and post-save paste chip | Phase 3 |
+| V-10 | Clipboard panel: populated, empty, with pinned items | Phase 3 |
+| V-11 | Keyboard total height vs. screen, portrait | Phase 3 |
 
 ---
 
-*Related docs: [PRODUCT.md](PRODUCT.md) (what's in v1) · [CLIPBOARD.md](CLIPBOARD.md) (panel behavior in full) · [CONSTRAINTS.md](CONSTRAINTS.md) (the platform limits cited here) · [ARCHITECTURE.md](ARCHITECTURE.md) (how this gets built) · [ROADMAP.md](ROADMAP.md) (M0 captures the reference screenshots).*
+*Related docs: [PRODUCT.md](PRODUCT.md) (what's in v1) · [CLIPBOARD.md](CLIPBOARD.md) (panel behavior in full) · [CONSTRAINTS.md](CONSTRAINTS.md) (the platform limits cited here) · [ARCHITECTURE.md](ARCHITECTURE.md) (how this gets built) · [ROADMAP.md](ROADMAP.md) (Phase 3 owns reference comparison and owner acceptance).*

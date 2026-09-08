@@ -1,92 +1,46 @@
 # Changelog
 
-All notable changes to **The Keyboard Project** will be documented in this file.
+Notable changes to The Keyboard Project are recorded here. The project follows semantic
+versioning after its first public release.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## Unreleased
 
----
+### Added
 
-## [Unreleased]
+- Manual, consented tap-to-save clipboard history in the host app and keyboard panel.
+- Pin/unpin, delete, confirmed clear-all, one-hour recent expiry and shortened-item labels.
+- Versioned asynchronous clipboard repository with typed failures, atomic protected writes,
+  backup exclusion, recovery fencing, migrations and cross-context stale-result protection.
+- Persistent haptic, sound, system/light/dark and clipboard preferences.
+- VoiceOver key activation and accessible clipboard/settings actions.
+- Deterministic clipboard fixtures, expanded typing/storage regression suites, static privacy
+  checks and a release-evidence gate.
+- Physical-device deploy workflow that verifies signing, profiles and App Group entitlements,
+  installs with `devicectl`, confirms installation and launches the host app.
 
 ### Changed
-- **The shipping keyboard no longer runs the M0 diagnostics harness.** It was never gated out
-  of Release: every keyboard appearance, in every app, did a UUID file write + read-back +
-  delete in the App Group container, a pasteboard IPC probe, a JSON encode and a second
-  verified write — plus a 1 Hz timer for as long as the keyboard was on screen.
-  `DiagnosticsRunner` and `DiagnosticsPanel` now compile out of Release entirely (verified:
-  zero matching symbols in the shipped `.appex`) and remain fully available in Debug.
-- **Host app is a setup screen, not a dashboard.** The three-step checklist leads, with a
-  button into this app's Settings page; the M0 verdicts, keyboard report and memory readings
-  moved to a Debug-only Developer section. After setup the keyboard is reached from the globe
-  key and the app never needs opening again.
-- The keyboard preview is Debug-only as well — it exists for Gboard side-by-side comparison,
-  which is development, not a feature. Gating it let the linker drop the keyboard-render graph
-  from the host app binary (1.3 MB → 653 KB).
-- The keyboard's strip no longer shows the `"M1"` label or a memory readout in Release. Its
-  height is kept as reserved space for M4's suggestion bar, so Debug and Release keyboards
-  stay the same shape.
 
-### Added
-- `KeyboardHandshake` — the one record the extension writes to the App Group in a shipping
-  build (that it ran, and whether Full Access is on, which only the extension can see).
-  Throttled and written off the main thread.
-- Signing-expiry countdown in the host app, so the free personal team's 7-day lapse is visible
-  before the keyboard stops working, plus `Scripts/redeploy.sh` to renew it in one command.
-- In-app privacy statement (nothing leaves the device, no network code at all).
-- `Tests/KeyboardHandshakeTests.swift` — 8 tests pinning the write throttle, including the
-  clock-skew regression above. The throttle fails invisibly when it errs toward suppressing,
-  so it is worth testing rather than observing.
-- `scrollUntilHittable` in the UI-test harness, so onboarding copy changes cannot masquerade
-  as touch-layer failures.
+- v1 is now explicitly iPhone-first, English (US), offline and dependency-free.
+- Clipboard access is manual-first. Opening or foregrounding either target never reads a
+  clipboard value; automatic capture is unavailable.
+- Clipboard limits are 50 recent, 25 pinned, one hour, 16 KiB per item and 2 MiB encoded.
+- Typing touch state now survives SwiftUI layout rerenders and cancels stale gestures,
+  repeaters and asynchronous insertions on later user actions.
+- Host and extension settings reconcile before edits to avoid overwriting newer preferences.
+- Debug diagnostics and preview helpers compile out of Release.
+- Suggestions and autocorrect moved to a post-v1 update.
 
 ### Fixed
-- **CI could not have passed, and would have failed confusingly.** The workflow pinned Xcode
-  15.4 while the project needs Xcode 16+ / Swift 6, `|| true` meant test failures were
-  swallowed, and the simulator picker could emit an empty UDID while still exiting 0 —
-  handing `id=` to `xcodebuild`. It now selects the newest Xcode present, fails loudly with
-  the available device list when no iPhone simulator exists, and tests gate.
-- **A future-dated handshake suppressed every later write.** `isRedundant` compared
-  `now.timeIntervalSince(stored.lastSeenAt) < staleAfter`; a record dated ahead of now — clock
-  moved backwards, or a restored backup — produced a negative age, read as "fresh", and froze
-  the host app's setup status. Covered by a regression test that fails without the fix.
-- **A lapsed provisioning profile read as "expires in 0 days".** `dateComponents` returns 0
-  for anything under 24 hours in either direction, so an already-dead profile looked
-  reassuring on the one screen whose job is to warn. Expiry is now decided from the date.
-- The Release strip held an `@ObservedObject` it never read. An observed object subscribes
-  whether or not the body uses it, so a blank band kept a live subscription to `pressedKeyIDs`
-  — which changes on every touch. Release now renders a constant view holding no model
-  reference.
-- Removed a force-unwrap of `URL(string: UIApplication.openSettingsURLString)`.
-- The keyboard's memory readout never updated. `diagnostics` is a nested `ObservableObject`
-  and does not forward `objectWillChange`, so the 1 Hz timer mutated a value nothing observed.
-  The Debug strip now observes the runner directly.
-- Duplicate constraint IDs in `docs/CONSTRAINTS.md`: `C-31` and `C-32` each named two
-  different facts, which breaks the citation scheme the project's methodology depends on. The
-  build-configuration pair was renumbered to `C-56`/`C-57`; the widely-cited Privacy Manifest
-  pair kept its numbers.
 
-### Removed
-- `AppLogo.imageset` — a 1024×1024, ~990 KB image referenced by nothing in the tree. Roughly
-  halves `Assets.car`.
+- Duplicate/missed rollover input, stale shifted/layer actions and physical backspace behavior.
+- Double-space rollback after cursor moves, host edits or clipboard insertion.
+- Late clipboard saves/insertions and mutation receipts restoring cleared, expired, dismissed
+  or Full-Access-revoked UI state.
+- Corrupt/future/oversized storage reset, speculative-backup recovery and temporary-file
+  cleanup without silently replacing unreadable history.
+- CI destination/error handling and device deployment that previously built without installing.
 
-## [0.1.0] - 2026-08-21
+## 0.1.0 — 2026-08-21
 
-### Added
-- **Official App Icon & Identity:** Minimalist geometric "3-Row Horizon" icon and asset catalog.
-- **Host App (`KeyboardProject`):**
-  - Interactive M0 feasibility test harness and live status dashboard.
-  - In-app keyboard preview view for side-by-side layout verification.
-  - Setup guide with live permission diagnostics (Full Access, Pasteboard permission).
-  - App Groups shared container round-trip verification.
-- **Keyboard Extension (`KeyboardExtension`):**
-  - Base QWERTY layout grid with Android Gboard key-width percentage geometry.
-  - Function row matching Gboard (symbols, comma, spacebar, period, return).
-  - Multi-layer support (Base lowercase, Shifted uppercase, Caps lock, Symbols `?123`, Extended `=\<`).
-  - Haptic feedback and native click sound integrations.
-  - Diagnostics panel accessible directly from the keyboard extension bar.
-- **Project & Tooling:**
-  - Complete XcodeGen configuration (`project.yml`) supporting reproducible builds without tracking `.xcodeproj`.
-  - Comprehensive unit test suite (`KeyboardProjectTests`) verifying layout math and typing behavior.
-  - Continuous integration workflows via GitHub Actions.
-  - Full documentation suite: Architecture, Constraints, Clipboard specification, UI specification, and ADR decision log.
+Initial native host app and keyboard-extension prototype with QWERTY layouts, shift/caps,
+symbols, deletion, cursor slide, long-press callouts, feedback, diagnostics and XcodeGen setup.

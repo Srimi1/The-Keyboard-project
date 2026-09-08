@@ -66,9 +66,9 @@ enum MoreKeys {
             return options.isEmpty ? nil : options
 
         default:
-            // The comma's settings gear is deferred: reaching the host app needs SwiftUI
-            // `Link` (C-48), which a UIKit-driven callout cannot host. Recorded rather than
-            // faked with something that would not open.
+            // v1 exposes preferences in the keyboard's dedicated settings panel. It does not
+            // give comma a host-app launch action; keyboard extensions may not launch other
+            // apps for this workflow.
             return nil
         }
     }

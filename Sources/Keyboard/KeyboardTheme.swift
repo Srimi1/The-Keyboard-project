@@ -13,6 +13,9 @@ struct KeyboardTheme {
     let keyLabel: Color
     let hintGlyph: Color
     let accent: Color
+    /// Readable on top of `accent` — white in light mode, near-black in dark, where the
+    /// lighter accent would otherwise swallow white text.
+    let onAccent: Color
     let popupBackground: Color
 
     static let light = KeyboardTheme(
@@ -22,6 +25,7 @@ struct KeyboardTheme {
         keyLabel: Color(red: 0.122, green: 0.122, blue: 0.122),           // #1F1F1F
         hintGlyph: Color(red: 0.373, green: 0.392, blue: 0.408),          // #5F6368
         accent: Color(red: 0.102, green: 0.451, blue: 0.910),             // #1A73E8
+        onAccent: .white,
         popupBackground: .white
     )
 
@@ -32,6 +36,7 @@ struct KeyboardTheme {
         keyLabel: Color(red: 0.910, green: 0.918, blue: 0.929),            // #E8EAED
         hintGlyph: Color(red: 0.604, green: 0.628, blue: 0.651),           // #9AA0A6
         accent: Color(red: 0.541, green: 0.706, blue: 0.973),              // #8AB4F8
+        onAccent: Color(red: 0.125, green: 0.129, blue: 0.141),            // #202124
         popupBackground: Color(red: 0.235, green: 0.251, blue: 0.263)      // #3C4043
     )
 
@@ -56,9 +61,9 @@ struct KeyboardTheme {
 
     /// Height of the strip above the keys.
     ///
-    /// M4 fills it with the suggestion bar and idle toolbar (UI-SPEC.md §7); until then it is
-    /// reserved, not removed. Keeping the space means Debug and Release keyboards are the same
-    /// shape, and that the geometry measured now is the geometry M4 lands into.
-    /// 📐 MEASURE — UI-SPEC.md V-09.
-    static let stripHeight: CGFloat = 28
+    /// The v1 strip carries clipboard and settings controls in both Debug and Release
+    /// (UI-SPEC.md §7; ADR-015). Keeping one height preserves identical core geometry.
+    /// It is 44 pt so its controls meet the minimum touch target, but remains a working value
+    /// until the Phase 3 visual comparison closes UI-SPEC.md V-09.
+    static let stripHeight: CGFloat = 44
 }

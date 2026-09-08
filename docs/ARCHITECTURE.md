@@ -1,216 +1,131 @@
-# ARCHITECTURE.md — System design
+# Architecture
 
-> How the pieces fit, who owns what, and which platform facts ([CONSTRAINTS.md](CONSTRAINTS.md)) forced each shape.
-> Decisions referenced here are recorded in [DECISIONS.md](DECISIONS.md) — this doc implements them, it doesn't make them.
+## Product boundary
 
----
+The project has two iPhone targets:
 
-## 1. System overview
-
-Two targets in one Xcode project, sharing one container:
-
-```
-┌──────────────────────────────┐         ┌──────────────────────────────┐
-│      HOST APP (container)    │         │   KEYBOARD EXTENSION         │
-│                              │         │   UIInputViewController      │
-│  • Onboarding checklist      │         │   com.apple.keyboard-service │
-│  • Settings                  │         │                              │
-│  • Clipboard history viewer  │         │  • Layout + typing engine    │
-│  • Capture on foreground     │         │  • Suggestion strip          │
-│                              │         │  • Clipboard panel           │
-│  runs: when user opens it    │         │  runs: inside OTHER apps'    │
-│                              │         │        processes (C-01)      │
-└───────────────┬──────────────┘         └──────────────┬───────────────┘
-                │                                       │
-                │      ┌─────────────────────────┐      │
-                └─────▶│   APP GROUP CONTAINER   │◀─────┘
-        read+write     │  • clipboard store      │   read always,
-        always         │  • settings (mirrored)  │   write needs Full Access (C-12)
-                       │  • personal dictionary  │
-                       └─────────────────────────┘
-                              no network, ever (ADR-005)
+```text
+Host app                         Keyboard extension
+----------------------------     --------------------------------
+onboarding                       UIInputViewController
+settings and history             native key rendering
+Debug-only keyboard preview      UIKit multi-touch capture
+                                 inline settings and clipboard
+             \                   /
+              App Group container
+              versioned JSON + shared defaults
 ```
 
-**The asymmetry that shapes everything:** the extension is the piece that runs constantly but has the fewest rights — limited memory (C-10), no writes to the shared container without Full Access (C-12), no network by policy (ADR-005), and it can be killed silently at any moment (C-03). The host app has full rights but runs rarely. Design accordingly: **the extension does the minimum that must happen at the keyboard, the host app does everything that can wait.**
+Both targets compile the small types under `Sources/Shared`; there is no shared framework
+and no third-party runtime dependency. The host app embeds the extension. The extension
+bundle identifier is a child of the host identifier and both signed targets must contain
+`group.com.srijan.keyboardproject`.
 
-## 2. Targets & identity
+The extension is treated as a constrained, disposable process. Typing cannot depend on the
+App Group, Full Access, clipboard availability or the host app.
 
-| | Host app | Keyboard extension |
-|---|---|---|
-| Bundle ID | `com.<name>.keyboardproject` | `com.<name>.keyboardproject.keyboard` |
-| Type | iOS app | App extension (`NSExtensionPointIdentifier` = `com.apple.keyboard-service`) |
-| Principal class | — | `UIInputViewController` subclass |
-| Key Info.plist | — | `RequestsOpenAccess = true` (C-06) |
+## Typing
 
-**Bundle-ID rule (ADR-008):** conventional `com.<name>.*` reverse-DNS only. iOS has shipped bugs where extensions with IDs starting `se.` / `mn.` **silently fail to appear** in Settings → Add New Keyboard. Choose the IDs at M0 and don't churn them — each change burns App IDs against the free account's weekly quota (C-23).
+`KeyboardViewController` owns `textDocumentProxy` and conforms to
+`KeyboardActionHandler`. SwiftUI receives only this narrow interface:
 
-**App Group ID:** defined **once**, in a single shared constant compiled into both targets (ADR-008). Never typed twice, never hardcoded at a call site.
-
-## 3. Framework boundary
-
-**KeyboardKit 10 free tier**, pinned to an exact SPM version (ADR-003 — provisional until the M0 spike).
-
-| KeyboardKit owns | We own |
-|---|---|
-| SwiftUI keyboard view hosting | Gboard layout definition + geometry ([UI-SPEC.md](UI-SPEC.md)) |
-| Dynamic layout engine | **Clipboard manager** (store, capture, panel) |
-| Input & action callouts | Theme palettes and styling values |
-| Gesture recognition plumbing | Suggestion strip + autocorrect engine |
-| Audio/haptic feedback plumbing | Toolbar |
-| Text-proxy utilities | Host app entirely |
-
-**Adapter rule.** KeyboardKit types stay behind **thin adapters in code we own** wherever that's cheap — a `KeyboardLayoutProvider` we define, our own key-model type, our own theme type. The framework is a closed binary from effectively a single maintainer; the fallback (a pinned fork of MIT KeyboardKit 9.9.0) must stay tractable. Don't spread framework types through the clipboard or autocorrect code, which have no reason to know the framework exists.
-
-## 4. Data layer
-
-### Clipboard store
-
-```
-ClipboardItem
-  id          UUID
-  text        String        // text only in v1 (ADR-006)
-  createdAt   Date          // drives 1-hour expiry
-  pinned      Bool          // pinned items never expire
-  contentHash String        // dedupe alongside changeCount
-  sourceHint  String?       // best-effort origin, nil when unknown
+```text
+UIKit touches → KeyboardTouch[] → KeyboardViewModel → KeyboardActionHandler
+                                               ├── insert
+                                               ├── delete
+                                               ├── cursor movement
+                                               └── next-keyboard UIKit button
 ```
 
-File-backed in the App Group container, **memory-mappable** — the store must be readable without loading everything into the extension's memory (C-10). Hard caps on item size and item count, enforced at write time, chosen at M3.
+`MultiTouchView` is a transparent UIKit surface with `isMultipleTouchEnabled = true`.
+It orders a batch by touch timestamp and assigns stable identities. Physical key IDs do not
+change when shift changes the displayed letter, so a layout rerender cannot lose a held
+finger. A new press commits earlier held keys in press order.
 
-### Settings
+Each active finger owns its long-press task and cursor-slide state. Dismissal, rotation,
+layer changes and panel changes cancel touches, repeat timers, callouts and pending
+gestures. The real globe control is a UIKit button so the system can show its input-mode
+menu.
 
-Settings are written by the host app and read by the extension. Because extension writes are unreliable without Full Access (C-12), settings are **mirrored** in both the shared container and the extension's local defaults, with **timestamp-based conflict resolution**: each key carries a last-written timestamp; the newer value wins on read. This is what production keyboards do, and it's the reason a settings change made in the host app appears in the keyboard even when the extension can't write back.
+Custom `UIAccessibilityElement` objects expose every non-globe key with a real activation
+action; the system button supplies globe-key accessibility.
 
-### Keyboard handshake
+## Clipboard contract
 
-The one thing the extension writes to the App Group in a **shipping** build: `lastSeenAt`,
-`hasFullAccess`, `appVersion` (`Sources/Shared/KeyboardHandshake.swift`). The host app's setup
-checklist needs two facts it cannot observe for itself — whether the keyboard has ever run, and
-whether Full Access is on, which only the extension can read (C-06) and which has no
-notification or KVO path (C-41).
+Clipboard access is manual-first. Neither target reads `UIPasteboard` during launch,
+foregrounding or keyboard appearance. The user taps a SwiftUI `PasteButton`, and its
+`NSItemProvider` is read through a bounded file representation.
 
-Written from `viewWillAppear` **off the main thread**, and only when the payload changed or the
-stored record has gone stale (6 h). Appearing is on the critical path of the keyboard showing
-up, so nothing there waits on storage.
+`ClipboardController` is a main-actor presentation layer. It owns consent/permission
+state, visible history, notices and cancellable operations. It never publishes optimistic
+history: UI state comes from a persisted repository receipt.
 
-Best-effort by design: extension writes are unreliable without Full Access (C-12), so a missing
-record means *"don't know"*, never *"broken"* — the checklist renders `.unknown` rather than a
-false negative.
+`ClipboardRepository` is an actor. Its public methods are asynchronous and return typed
+snapshots or mutation receipts. Inside a process the actor orders work; between the host
+and extension an `NSFileCoordinator` claim covers the complete read-modify-write
+transaction.
 
-> The M0 harness (`DiagnosticsRunner`, `DiagnosticsPanel`, `DiagnosticsStore` reports) is a
-> **development tool** and compiles out of Release. It probed the container, the pasteboard and
-> memory on *every* keyboard appearance; that is far too expensive for a keyboard people type
-> on. In Debug it still runs and still writes full `DiagnosticsReport`s.
+The JSON envelope contains:
 
-### Personal dictionary
+- `schemaVersion` for compatible migration and future-schema rejection;
+- a store `generation` plus a revision monotonic within that generation for stale-result
+  rejection and destructive-reset detection;
+- `clearedAt` as a durable fence against delayed captures;
+- validated `ClipboardItem` values and content hashes.
 
-Words accepted by the user learn into the App Group store (ADR-009). Written from the extension when Full Access allows; otherwise queued in local defaults and reconciled the next time the host app runs.
+Writes secure and backup-exclude an empty temporary inode before adding bytes, then atomically
+replace the destination. Primary and recovery copies mirror the same committed document; a
+marker binds generation, revision and content digest so deleted or expired text cannot be
+resurrected from divergent data. Existing artifacts and quarantines are migrated to the same
+metadata policy before decoding. A confirmed corrupt primary may recover from the last good
+copy; transient I/O errors and future schemas do not. Unreadable data is preserved rather than
+silently replaced by empty history.
 
-## 5. Clipboard capture pipeline
+See [CLIPBOARD.md](CLIPBOARD.md) for limits and permission behavior.
 
-The pipeline is entirely shaped by one fact: **iOS has no background clipboard monitoring** (C-13). We can only capture when our code is running.
+## Settings
 
-```
-TRIGGER (one of three)
-  ├─ keyboard becomes visible          (extension)
-  ├─ changeCount poll while visible    (extension, timer)
-  └─ host app enters foreground        (host app)
-        │
-        ▼
-DETECT — changeCount != lastSeen && hasStrings     ← prompt-free (C-16)
-        │  no change → stop, cost nothing
-        ▼
-READ — UIPasteboard.general.string                 ← the only prompting call (C-14)
-        │  requires Full Access (C-05) + "Paste from Other Apps = Allow" (C-15)
-        ▼
-DEDUPE — by changeCount, then contentHash
-        │  already stored → bump nothing, stop
-        ▼
-STORE — append to App Group store, enforce size/count caps
-        │
-        ▼
-SWEEP — delete unpinned items older than 1 hour
-```
+`KeyboardSettingsStore` persists one versioned, timestamped settings record:
 
-**Failure behavior at each stage:** no Full Access → skip the whole pipeline, panel shows its no-access state. Read prompts appear anyway (Q-05 unresolved) → fall back to explicit tap-to-capture rather than automatic reads. Store unavailable → keyboard still types; clipboard degrades to empty. **Nothing in this pipeline may block typing.**
+- haptics;
+- keypress sound;
+- system/light/dark appearance;
+- clipboard mode;
+- clipboard notice version.
 
-Detection is free — `changeCount` and `hasStrings` never prompt (C-16) — so poll cheaply and read rarely. Full spec: [CLIPBOARD.md](CLIPBOARD.md).
+The whole newer record wins, and stores refresh immediately before each field edit. When
+shared defaults are reachable, the selected record is reconciled into both shared and
+process-local defaults. This keeps basic preferences
+available after Full Access is revoked. Defaults are haptics on, sound off, system
+appearance and manual clipboard mode gated by the retention notice.
 
-## 6. Typing pipeline
+Automatic clipboard capture cannot currently be enabled, including from a stale stored
+value.
 
-```
-touch → key model (layer + shift state) → action
-                                            ├─ character  → textDocumentProxy.insertText
-                                            ├─ backspace  → deleteBackward (+ repeat timer)
-                                            ├─ cursor      → adjustTextPosition(byCharacterOffset:)
-                                            ├─ layer switch → state machine, no proxy call
-                                            └─ globe      → handleInputModeList (C-21)
-```
+## Failure and privacy boundaries
 
-**Context limits.** `documentContextBeforeInput` returns roughly the last couple of sentences — never the full document (C-18). Auto-capitalization, double-space-period, and the correction engine all read from that window and must behave correctly when it's short or empty. **Never assume more context than the API returns**, and never implement cursor-moving tricks to reconstruct more — they're fragile and out of scope.
+| Condition | Typing | Clipboard behavior | Settings |
+|---|---|---|---|
+| Full Access off | available | cached history hidden; extension cannot save/insert/mutate | local mirror |
+| App Group unavailable | available | typed error and unavailable UI | local mirror |
+| Corrupt JSON | available | preserve data, recover only from valid backup | unaffected |
+| Extension dismissal/rotation | pending input cancelled | transient work invalidated; confirmed mutations finish without stale UI | persisted |
+| Secure or restricted field | iOS may replace the custom keyboard | unavailable | unchanged |
 
-## 7. Autocorrect pipeline
+There is no app-owned networking, analytics, advertising or account system. Full Access
+technically grants broader extension capability, which is why code and static checks—not
+the permission name—enforce the offline product policy. Clipboard text is never logged.
+Stored files use complete data protection and backup exclusion.
 
-```
-word being typed
-   ├─ UITextChecker      → guesses + completions       (works without Full Access, C-19)
-   ├─ UILexicon          → contacts + text replacements (requestSupplementaryLexicon)
-   └─ frequency dict     → ranking (memory-mapped, C-10)
-         ▼
-   candidates → rank → 3 strip slots (middle = autocorrect, literal always reachable)
-         ▼
-   space pressed → commit middle candidate if confidence ≥ threshold
-         ▼
-   backspace immediately after → revert to literal input
-         ▼
-   accepted word not in dictionaries → learn into personal dictionary
-```
+## Debug and Release separation
 
-Thresholds are **conservative by design** (ADR-009): under-correcting is an annoyance, over-correcting is why people uninstall keyboards. There is no access to Apple's autocorrect engine (C-19) — this pipeline is the whole story.
+The keyboard preview, pasteboard diagnostic probe and live memory diagnostics compile only
+under `DEBUG`. Release builds keep the normal clipboard/settings toolbar but none of those
+harnesses. CI compiles an unsigned iPhone-architecture Release build; public distribution still
+requires a signed Organizer archive and its own evidence.
 
-## 8. Feedback subsystem
+## Deferred architecture
 
-`UIImpactFeedbackGenerator` for haptics, `UIDevice.current.playInputClick()` for clicks (not `AVAudioPlayer` — wrong audio bus in extensions, C-08), paired with a `UIInputViewAudioFeedback` conformance on the `UIInputView` itself, not the controller (C-50). Both sit behind a single feature gate on `hasFullAccess`: the APIs no-op without Full Access (C-07), and `playInputClick` without Full Access has also been reported to hang rather than fail silently (C-51) — so the gate is mandatory to keep typing responsive (C-09), not just hygiene to avoid pointless work.
-
-## 9. Degradation matrix
-
-**The invariant: the keyboard always types.** Everything else is optional.
-
-| Condition | Typing | Clipboard | Haptics/sound | Settings | User sees |
-|---|---|---|---|---|---|
-| Full Access **off** | ✅ | ❌ | ❌ | read-only (C-12) | Panel explains + links to host app |
-| Host app **never opened** | ✅ | ✅ (capture works) | ✅ | defaults | Nothing unusual |
-| App Group **unavailable** | ✅ | ❌ | ✅ | local only | Panel shows empty state |
-| **Secure / phone-pad field** | n/a — system keyboard takes over (C-20) | | | | Stock keyboard appears |
-| Host app **bans extensions** | n/a — banned (C-20) | | | | Stock keyboard appears |
-| Paste prompts **still appear** (Q-05) | ✅ | manual capture only | ✅ | ✅ | Tap chip to capture |
-
-## 10. Memory strategy
-
-**Budget: ≤ 40 MB steady state**, against a jetsam ceiling around ~60 MB that kills **silently, with no crash log** (C-10). A keyboard that vanishes mid-sentence is the worst failure this project can ship.
-
-Rules:
-- **Memory-map** the frequency dictionary and clipboard store rather than loading them (a documented 52 MB → 27 MB win in a comparable keyboard).
-- **No heavy visual effects** — gradients, shadows, and blur measurably worsen the per-appearance leak pattern (C-02).
-- **Text-only clipboard** (ADR-006) — images are the fastest route to a kill.
-- **Lazy-construct** the clipboard panel and any secondary UI; build on first open, not at launch.
-- **`deinit` hygiene:** empty heavy views on teardown, deferred one runloop turn — each host app creates a fresh controller whose view is retained after dismissal (C-02).
-
-**Profiling is a milestone gate, not a final step.** Every milestone exits with an Instruments `phys_footprint` measurement recorded in [ROADMAP.md](ROADMAP.md). Measure on the oldest device that will actually be used.
-
-## 11. Host app architecture
-
-The host app exists to do what the extension can't, and App Review would require it to have real functionality anyway if this were ever published (C-30).
-
-- **Onboarding state machine**, with live status detection at each step: *keyboard added* → *Full Access enabled* → *"Paste from Other Apps" = Allow*. Steps 1 and 2 read the handshake (§4); step 3 cannot be decided without a pasteboard **value** read, the one call that can prompt (C-14), so outside Debug it stays an instruction rather than a verdict until M3's capture pipeline needs the value anyway. Because a re-signing cycle on the free account can reset toggles (C-23, ADR-004), this screen is also the diagnostic — a lost toggle is visible in seconds instead of surfacing as "the clipboard mysteriously stopped working."
-  - This is the app's **primary screen**, not a section of a dashboard. Once the checklist is green the keyboard is reached from the globe key and the app has no further routine role. Everything that serves development — the M0 verdicts, the keyboard's report, memory readings, the keyboard preview — is in a `#if DEBUG` Developer section.
-  - **"Open Settings"** uses `UIApplication.openSettingsURLString`, which lands on *this app's own* Settings page: Full Access and "Paste from Other Apps" are there, but the Keyboards list is not reachable by any public deep link, so step 1 is given in words (C-55). Settings is also the only app a keyboard product may launch at all (C-30, 4.4.1).
-  - **Signing countdown** — days until the provisioning profile lapses, read from `embedded.mobileprovision` (Q-11). On a free personal team that is a 7-day clock and its expiry is indistinguishable, from the phone, from the keyboard simply breaking (C-23).
-- **Settings** — writes to the shared container (§4).
-- **Clipboard history viewer/manager** — the full-size counterpart to the keyboard panel: browse, pin, delete.
-- **Foreground capture** — the host app is one of the three capture triggers (§5).
-- **Opening the host app from the keyboard:** SwiftUI `Link` only. iOS 18 killed the selector-based `openURL` trick (CONSTRAINTS §8 gotcha ledger).
-
----
-
-*Related docs: [CONSTRAINTS.md](CONSTRAINTS.md) (every platform fact cited above) · [DECISIONS.md](DECISIONS.md) (the choices being implemented) · [CLIPBOARD.md](CLIPBOARD.md) (capture pipeline in full) · [UI-SPEC.md](UI-SPEC.md) (what the views render) · [ROADMAP.md](ROADMAP.md) (build order and memory gates).*
+Suggestions, autocorrect, personal dictionaries, automatic capture and cloud features are
+not part of v1. They must not be presented as implemented and must pass a separate privacy,
+memory and device-design review before entering the runtime.

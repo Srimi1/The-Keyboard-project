@@ -17,17 +17,9 @@ options:
 
 settings:
   base:
-    # XcodeGen pins SWIFT_VERSION to 5.0 at project level whether you ask or not, so state
-    # it rather than discover it. Swift 5 mode makes isolation violations warnings instead
-    # of hard errors; the two settings below give Swift 6's code shape now, so flipping
-    # SWIFT_VERSION to "6.0" later is a one-line migration.
-    #
-    # Verified 2026-08-22: `xcodebuild ... SWIFT_VERSION=6.0` builds both targets with zero
-    # errors and zero warnings from our own sources. Re-check it after touching anything that
-    # crosses an actor boundary — `Sources/Shared` compiles into both targets and is reached
-    # from a background queue by the keyboard handshake, which is exactly where this breaks
-    # first (both `AppGroup` and `KeyboardHandshake` are `nonisolated` for that reason).
-    SWIFT_VERSION: "5.0"
+    # Swift 6 is the production baseline. Actor violations fail the build instead of becoming
+    # warnings that can turn into typing stalls or stale clipboard state.
+    SWIFT_VERSION: "6.0"
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     # Xcode applies this only to `application` product types, which would leave the app
     # MainActor-isolated and the extension nonisolated — two concurrency worlds in one
@@ -37,6 +29,12 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
+    # Read from the environment so the team ID is not committed:
+    #     DEVELOPMENT_TEAM=XXXXXXXXXX xcodegen generate
+    # Empty is fine for simulator builds. It is NOT optional for device builds or for
+    # Xcode.app: with no team the Signing & Capabilities pane shows "Team: None" and Xcode
+    # will not create or repair anything, which is what made C-58 look unfixable.
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
     GENERATE_INFOPLIST_FILE: NO          # explicit plists — the extension's NSExtension dict is load-bearing
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_EMIT_LOC_STRINGS: NO
@@ -73,11 +71,6 @@ targets:
         # TARGETED_DEVICE_FAMILY "1,2" at TARGET level, which beats anything in the
         # project-level base — set it only above and you silently ship a universal app.
         TARGETED_DEVICE_FAMILY: "1"
-        # Same reason: the iOS application preset injects the legacy identity
-        # "iPhone Developer" at target level, which no longer matches modern
-        # certificates and fails signing on device.
-        CODE_SIGN_IDENTITY: "-"
-        "CODE_SIGN_IDENTITY[sdk=iphoneos*]": "Apple Development"
     dependencies:
       - target: KeyboardExtension
         embed: true
@@ -100,7 +93,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/Keyboard/Keyboard.entitlements
         # See the host app — platform presets land at target level.
         TARGETED_DEVICE_FAMILY: "1"
-        "CODE_SIGN_IDENTITY[sdk=iphoneos*]": "Apple Development"
         # XcodeGen does not set this for app-extension targets; without it,
         # `xcodebuild archive` leaves a stray .appex at the archive root.
         SKIP_INSTALL: YES
@@ -126,6 +118,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: ""
+        # XCTestCase's Objective-C initializers and lifecycle hooks are nonisolated.
+        # Inheriting the app's MainActor default makes every test subclass an invalid
+        # override under Swift 6, so tests opt out and annotate UI work explicitly.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
     dependencies:
       - target: KeyboardProject
 
@@ -142,9 +138,8 @@ targets:
   # owns — the text document proxy, real Full Access, haptics, the globe key, and the
   # memory budget. Those stay device-only, per the milestone exit criteria.
   #
-  # There are no accessibility identifiers in Sources/ and none should be added for the
-  # tests' benefit: tests tap by coordinate, derived from the same percentage layout
-  # KeyboardMetrics uses.
+  # Coordinate probes still verify the raw multi-touch surface. Stable accessibility
+  # identifiers serve VoiceOver semantics and deterministic non-touch UI tests.
   KeyboardProjectUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -156,6 +151,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: ""
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
     dependencies:
       - target: KeyboardProject
 

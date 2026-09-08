@@ -17,6 +17,9 @@ xcuserdata/
 *.hmap
 *.ipa
 *.dSYM.zip
+*.dSYM
+*.xcarchive
+*.xcresult
 
 # Swift Package Manager
 .build/
@@ -24,7 +27,12 @@ xcuserdata/
 
 # Secrets / signing — never commit
 *.mobileprovision
+*.provisionprofile
 *.p12
+*.pfx
+*.pem
+*.key
+*.p8
 *.cer
 
 # Claude Code session state
@@ -35,6 +43,8 @@ xcuserdata/
 
 # Ruflo local secrets and runtime data
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 .claude-flow/data/
