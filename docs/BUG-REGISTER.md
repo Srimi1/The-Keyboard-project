@@ -16,14 +16,15 @@ P2 important degradation; Gate evidence that cannot be produced by simulator cod
 | KB-007 | P2 | One process edits a stale settings record and overwrites another preference | two-store distinct-field test | Fixed; automated |
 | KB-008 | P1 | Deploy command builds but never installs | script now verifies, installs, confirms and launches | Fixed in script; device run open |
 | KB-009 | P1 | CI passes broken destinations or swallows failures | pinned serial CI and explicit simulator selection | Fixed; hosted CI run open |
+| KB-010 | P2 | `make test` assumes a simulator literally named `iPhone 17`, while local/CI runtimes may use another name | selector prefers the booted iPhone and passes its exact UDID | Fixed; automated command |
 
 For a regression, add its exact steps, expected/actual behavior and a failing test before the
 fix where practical. Do not close from code inspection alone.
 
 ## Open release blockers
 
-Current evidence on 2026-09-08: clean Debug and Release builds report zero compiler
-warnings or errors; 144 of 145 unit/integration tests passed with the signed-device-only
+Current evidence on 2026-09-09: clean Debug and Release builds report zero compiler
+warnings or errors; 146 of 147 unit/integration tests passed with the signed-device-only
 file-protection check skipped, and all 17 deterministic UI tests passed. The host app and
 keyboard preview installed and launched on an iPhone 17 simulator. The target iPhone is paired,
 but was unavailable to CoreDevice during deployment, so no physical-device gate is closed.

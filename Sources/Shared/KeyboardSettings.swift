@@ -5,6 +5,16 @@ nonisolated enum KeyboardAppearance: String, Codable, CaseIterable, Sendable {
     case system
     case light
     case dark
+    case neon
+
+    var displayName: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Black"
+        case .neon: "Neon"
+        }
+    }
 }
 
 nonisolated enum ClipboardCaptureMode: String, Codable, CaseIterable, Sendable {

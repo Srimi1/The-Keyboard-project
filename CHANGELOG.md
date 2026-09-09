@@ -11,7 +11,9 @@ versioning after its first public release.
 - Pin/unpin, delete, confirmed clear-all, one-hour recent expiry and shortened-item labels.
 - Versioned asynchronous clipboard repository with typed failures, atomic protected writes,
   backup exclusion, recovery fencing, migrations and cross-context stale-result protection.
-- Persistent haptic, sound, system/light/dark and clipboard preferences.
+- Persistent haptic, sound, System/Light/Black/Neon theme and clipboard preferences.
+- Token-driven key gradients, borders, pressed states, monoline function icons and a ViewMax
+  design handoff under `assets/themes/`.
 - VoiceOver key activation and accessible clipboard/settings actions.
 - Deterministic clipboard fixtures, expanded typing/storage regression suites, static privacy
   checks and a release-evidence gate.

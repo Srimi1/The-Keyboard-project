@@ -12,6 +12,7 @@ This repository is a **pre-release device candidate**, not a public release.
 |---|---|
 | Typing, shift/caps, symbols, deletion, long-press and cursor slide | Implemented with unit and simulator UI coverage |
 | VoiceOver key actions and inline settings | Implemented; physical-device acceptance remains open |
+| Light, Black and Neon visual themes | Implemented as native vector surfaces; device appearance/performance approval remains open |
 | Clipboard history | Manual tap-to-save, consented, bounded and local |
 | iPhone deployment | Build/install/verify/launch workflow implemented; must pass on the connected target phone |
 | Public launch | Blocked on device acceptance, performance measurements and a 14-day TestFlight beta |
@@ -25,6 +26,7 @@ the current iOS release must be demonstrated before App Store submission.
 - Offline operation with no accounts, analytics, advertising or app-owned networking
 - Native four-row keyboard with a real system next-keyboard button
 - Haptic setting on by default, sound off by default and system appearance by default
+- Selectable Light, Black and Neon themes with unified key, toolbar, popup and panel styling
 - Persistent tap-to-save clipboard history with pin, unpin, delete and clear-all controls
 - Typing and next-keyboard switching without Full Access
 
@@ -116,6 +118,7 @@ Tests/              deterministic unit and integration-style repository tests
 UITests/            host preview and deterministic clipboard UI trials
 Scripts/            static verification and physical-device deployment
 docs/               architecture, privacy, acceptance and release evidence
+assets/themes/      ViewMax direction board, theme tokens, icon map and real-render previews
 ```
 
 ## Documentation

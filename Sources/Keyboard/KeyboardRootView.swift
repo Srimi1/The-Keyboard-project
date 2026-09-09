@@ -15,7 +15,8 @@ struct KeyboardRootView: View {
         switch settings.values.appearance {
         case .system: return .forColorScheme(colorScheme)
         case .light: return .light
-        case .dark: return .dark
+        case .dark: return .black
+        case .neon: return .neon
         }
     }
 
@@ -28,6 +29,7 @@ struct KeyboardRootView: View {
         // Transparent, never an opaque fill — iOS 26 wraps keyboards in a system glass
         // container and an opaque background renders as a gray bar (CONSTRAINTS §8).
         .background(Color.clear)
+        .accessibilityIdentifier("keyboard.theme.\(theme.id)")
     }
 
     @ViewBuilder
@@ -90,7 +92,9 @@ private struct KeyboardStrip: View {
             settingsButton
 
             #if DEBUG
-            DebugReadout(model: model, runner: model.diagnostics, theme: theme)
+            if !ProcessInfo.processInfo.arguments.contains("-cleanPreview") {
+                DebugReadout(model: model, runner: model.diagnostics, theme: theme)
+            }
             #endif
         }
         .padding(.horizontal, 8)
@@ -104,10 +108,23 @@ private struct KeyboardStrip: View {
         Button {
             model.toggleClipboard()
         } label: {
-            Image(systemName: model.panel == .clipboard ? "keyboard" : "doc.on.clipboard")
+            Image(systemName: model.panel == .clipboard
+                ? KeyboardIconography.keyboard
+                : KeyboardIconography.clipboard)
                 .font(.system(size: 15))
                 .foregroundStyle(model.panel == .clipboard ? theme.accent : theme.keyLabel)
                 .frame(width: 44, height: 44)
+                .background(
+                    theme.keyGradient(for: .function),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(
+                            model.panel == .clipboard ? theme.accent : theme.keyBorder,
+                            lineWidth: model.panel == .clipboard ? 1.5 : theme.keyBorderWidth
+                        )
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -117,10 +134,23 @@ private struct KeyboardStrip: View {
 
     private var settingsButton: some View {
         Button { model.toggleSettings() } label: {
-            Image(systemName: model.panel == .settings ? "keyboard" : "gearshape")
+            Image(systemName: model.panel == .settings
+                ? KeyboardIconography.keyboard
+                : KeyboardIconography.settings)
                 .font(.system(size: 15))
                 .foregroundStyle(model.panel == .settings ? theme.accent : theme.keyLabel)
                 .frame(width: 44, height: 44)
+                .background(
+                    theme.keyGradient(for: .function),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(
+                            model.panel == .settings ? theme.accent : theme.keyBorder,
+                            lineWidth: model.panel == .settings ? 1.5 : theme.keyBorderWidth
+                        )
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -138,7 +168,7 @@ private struct PasteChip: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 4) {
-                Image(systemName: "doc.on.clipboard.fill")
+                Image(systemName: KeyboardIconography.clipboardFilled)
                     .font(.system(size: 9))
                 Text(text)
                     .font(.system(size: 12))
@@ -148,7 +178,10 @@ private struct PasteChip: View {
             .foregroundStyle(theme.keyLabel)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(theme.functionKeyFill, in: Capsule())
+            .background(theme.keyGradient(for: .function), in: Capsule())
+            .overlay {
+                Capsule().stroke(theme.keyBorder, lineWidth: theme.keyBorderWidth)
+            }
         }
         .buttonStyle(.plain)
         // VoiceOver reads the whole label; a truncated copy keeps it usable when the pasteboard
@@ -347,22 +380,26 @@ private struct KeyFace: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                .fill(theme.fill(for: key.style))
+                .fill(theme.keyGradient(for: key.style))
+                .overlay {
+                    RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                        .stroke(
+                            isActive ? theme.accent : theme.keyBorder,
+                            lineWidth: isActive ? max(1.5, theme.keyBorderWidth) : theme.keyBorderWidth
+                        )
+                }
+                .shadow(color: theme.shadowColor, radius: theme.shadowRadius, y: theme.shadowY)
+                .shadow(color: theme.glowColor, radius: theme.glowRadius)
 
             // Pressed keys darken rather than fade. The keyboard background is transparent
             // (iOS 26 glass), so an opacity drop lets the host app bleed through the key —
             // a dim overlay keeps it opaque and legible in both palettes.
             if isPressed {
                 RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                    .fill(Color.black.opacity(0.14))
+                    .fill(theme.pressedOverlay)
             }
 
-            Text(key.label)
-                .font(labelFont)
-                .foregroundStyle(isActive ? theme.accent : theme.keyLabel)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .padding(.horizontal, 2)
+            keyLabel
 
             // Digit hints on the top row. Long-press inserts them (UI-SPEC.md §5b); their
             // exact styling remains a Phase 3 comparison against the owner's Gboard reference.
@@ -379,6 +416,22 @@ private struct KeyFace: View {
                 .padding(.top, 3)
                 .padding(.trailing, 4)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var keyLabel: some View {
+        if let symbol = KeyboardIconography.symbolName(for: key, isActive: isActive) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(isActive ? theme.accent : theme.keyLabel)
+        } else {
+            Text(key.label)
+                .font(labelFont)
+                .foregroundStyle(isActive ? theme.accent : theme.keyLabel)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, 2)
         }
     }
 
@@ -434,7 +487,12 @@ private struct CalloutBar: View {
         .background(
             RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
                 .fill(theme.popupBackground)
-                .shadow(radius: 2, y: 1)
+                .overlay {
+                    RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
+                        .stroke(theme.keyBorder, lineWidth: theme.keyBorderWidth)
+                }
+                .shadow(color: theme.shadowColor, radius: 2, y: 1)
+                .shadow(color: theme.glowColor, radius: theme.glowRadius)
         )
         .position(
             x: origin.x + option.width * CGFloat(columns) / 2,
@@ -452,6 +510,11 @@ private struct KeyPreview: View {
         ZStack {
             RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
                 .fill(theme.popupBackground)
+                .overlay {
+                    RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius + 2, style: .continuous)
+                        .stroke(theme.keyBorder, lineWidth: theme.keyBorderWidth)
+                }
+                .shadow(color: theme.glowColor, radius: theme.glowRadius)
             Text(label)
                 .font(.system(size: 26, weight: .regular))
                 .foregroundStyle(theme.keyLabel)
@@ -469,11 +532,12 @@ private struct NextKeyboardButton: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIButton {
         let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "globe"), for: .normal)
+        button.setImage(UIImage(systemName: KeyboardIconography.globe), for: .normal)
         button.tintColor = UIColor(theme.keyLabel)
         button.backgroundColor = UIColor(theme.functionKeyFill)
         button.layer.cornerRadius = KeyboardTheme.keyCornerRadius
         button.layer.cornerCurve = .continuous
+        applyTheme(to: button)
         button.accessibilityLabel = "Next keyboard"
         configure(button)
         return button
@@ -482,5 +546,15 @@ private struct NextKeyboardButton: UIViewRepresentable {
     func updateUIView(_ button: UIButton, context: Context) {
         button.tintColor = UIColor(theme.keyLabel)
         button.backgroundColor = UIColor(theme.functionKeyFill)
+        applyTheme(to: button)
+    }
+
+    private func applyTheme(to button: UIButton) {
+        button.layer.borderColor = UIColor(theme.keyBorder).cgColor
+        button.layer.borderWidth = theme.keyBorderWidth
+        button.layer.shadowColor = UIColor(theme.glowColor).cgColor
+        button.layer.shadowOpacity = theme.glowRadius > 0 ? 1 : 0
+        button.layer.shadowRadius = theme.glowRadius
+        button.layer.shadowOffset = .zero
     }
 }

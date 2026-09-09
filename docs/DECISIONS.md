@@ -235,6 +235,28 @@ to work without affecting ordinary typing or next-keyboard switching.
 
 ---
 
+## ADR-016 — Themes are native visual tokens, not per-key bitmap skins
+
+**Date:** 2026-09-08 · **Status:** Accepted
+
+**Context.** The owner wants coherent Light, Black and Neon keyboards, including icons and every
+key state. A folder of separately generated key images would blur at different sizes, drift out
+of alignment, consume extension memory and make pressed/accessibility states difficult to keep
+consistent. ViewMax is useful for visual direction but generated UI is not reliable geometry.
+
+**Decision.** Render every shipping surface from one selected `KeyboardTheme`: canvas reference,
+letter/function gradients, labels, hints, accent, border, pressed overlay, shadow and bounded
+glow. Use semantic SF Symbols for function icons. Preserve `dark` as the stored raw value while
+presenting it as Black; add Neon as a new stable value. Store the ViewMax concept, portable JSON
+tokens, icon map and real simulator captures under `assets/themes/`.
+
+**Consequences.** Themes scale without bitmap decoding or per-letter exceptions and remain
+editable in code. System appearance resolves to Light or Black. Neon adds shallow per-key glow,
+so signed-device GPU/memory acceptance remains mandatory before public release. Any later theme
+must supply the full token set and a real-render preview rather than recoloring isolated keys.
+
+---
+
 ## Template for new ADRs
 
 ```markdown

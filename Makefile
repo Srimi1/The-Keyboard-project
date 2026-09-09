@@ -7,7 +7,9 @@ APP := KeyboardProject
 SCHEME := KeyboardProject
 CONFIG ?= Debug
 SIM_DESTINATION ?= generic/platform=iOS Simulator
-TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
+# Override when a specific simulator is required. By default, select a booted iPhone or the
+# newest available iPhone by UDID; model names vary between local and CI runtimes.
+TEST_DESTINATION ?= platform=iOS Simulator,id=$(shell ./Scripts/select-simulator.sh)
 DEVICE_ID ?=
 DEVICE_DERIVED_DATA ?= $(CURDIR)/.build/device
 

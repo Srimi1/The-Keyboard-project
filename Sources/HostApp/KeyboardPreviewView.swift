@@ -36,6 +36,7 @@ struct KeyboardPreviewView: View {
             model.handler = handler
             // Mirror a live extension appearance, but the clipboard remains manual-first.
             model.activate(hasFullAccess: handler.hasFullAccess)
+            applyRequestedPreviewOptions()
             model.syncWithTextField()
             // The host app's footprint, not the extension's — the number that counts against
             // the 40 MB budget is the one the keyboard reports when running inside another
@@ -104,9 +105,47 @@ struct KeyboardPreviewView: View {
     /// The extension itself must stay transparent for iOS 26's glass container, so the
     /// preview supplies the background iOS would otherwise draw behind it.
     private var previewBackground: some View {
-        KeyboardTheme.forColorScheme(.light).keyboardBackground
+        KeyboardPreviewBackdrop(settings: model.settings)
             .overlay(alignment: .top) { Divider() }
-            .preferredColorScheme(nil)
+    }
+
+    /// Allows deterministic repository previews without adding a shipping-only control:
+    /// `-keyboardPreview -keyboardTheme neon -keyboardGlobe -cleanPreview`.
+    private func applyRequestedPreviewOptions() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-keyboardGlobe") {
+            // The owner's measured device layout includes the system next-keyboard key. The
+            // host preview has no controller to report that value, so clean asset captures opt
+            // in explicitly while ordinary UI tests retain their calibrated comma layout.
+            model.needsGlobe = true
+        }
+        guard let flag = arguments.firstIndex(of: "-keyboardTheme"),
+              arguments.indices.contains(flag + 1) else { return }
+        let requested = arguments[flag + 1]
+        let appearance = requested == "black"
+            ? KeyboardAppearance.dark
+            : KeyboardAppearance(rawValue: requested)
+        if let appearance {
+            model.setAppearance(appearance)
+        }
+    }
+}
+
+private struct KeyboardPreviewBackdrop: View {
+    @ObservedObject var settings: KeyboardSettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var theme: KeyboardTheme {
+        switch settings.values.appearance {
+        case .system: KeyboardTheme.forColorScheme(colorScheme)
+        case .light: .light
+        case .dark: .black
+        case .neon: .neon
+        }
+    }
+
+    var body: some View {
+        theme.canvasGradient
     }
 }
 
@@ -134,7 +173,9 @@ final class PreviewActionHandler: ObservableObject, KeyboardActionHandler {
     }
 
     func configureNextKeyboardButton(_ button: UIButton) {
-        button.isEnabled = false   // no keyboard to switch to from inside the app
+        // The host preview has no keyboard list to switch, but leaving the inert control enabled
+        // renders the same tint/contrast used by the live extension.
+        button.isEnabled = true
     }
 
     var hasFullAccess: Bool { true }

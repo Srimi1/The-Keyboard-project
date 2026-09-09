@@ -185,7 +185,10 @@ struct ClipboardPanel: View {
             .lineLimit(2)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-            .background(theme.functionKeyFill.opacity(0.75))
+            .background(theme.keyGradient(for: .function))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(theme.keyBorder).frame(height: theme.keyBorderWidth)
+            }
     }
 
     private func message(icon: String, title: String, detail: String) -> some View {
@@ -235,7 +238,12 @@ private struct ClipboardCell: View {
             }
             .padding(8)
             .frame(height: 72, alignment: .topLeading)
-            .background(theme.letterKeyFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(theme.keyGradient(for: .letter), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(theme.keyBorder, lineWidth: theme.keyBorderWidth)
+            }
+            .shadow(color: theme.glowColor, radius: theme.glowRadius)
         }
         .buttonStyle(CellPressStyle())
         .contextMenu {

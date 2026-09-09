@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "system": "SF Symbols",
+  "rendering": "monochrome vector tinted by the active theme",
+  "icons": {
+    "toolbar.clipboard": "doc.on.clipboard",
+    "toolbar.clipboardFilled": "doc.on.clipboard.fill",
+    "toolbar.settings": "gearshape",
+    "toolbar.backToKeyboard": "keyboard",
+    "key.shift": "shift",
+    "key.shiftActive": "shift.fill",
+    "key.backspace": "delete.left",
+    "key.nextKeyboard": "globe",
+    "key.returnDefault": "return"
+  },
+  "rules": [
+    "Use text for letter, number, punctuation, layer and dynamic return labels.",
+    "The globe remains a real UIKit next-keyboard button; changing its image must not replace its system event handling.",
+    "All icons inherit keyLabel or accent color and never embed theme-specific raster color."
+  ]
+}

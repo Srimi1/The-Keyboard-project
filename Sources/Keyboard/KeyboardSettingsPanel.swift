@@ -81,9 +81,9 @@ struct KeyboardSettingsPanel: View {
                 get: { settings.values.appearance },
                 set: { model.setAppearance($0) }
             )) {
-                Text("System").tag(KeyboardAppearance.system)
-                Text("Light").tag(KeyboardAppearance.light)
-                Text("Dark").tag(KeyboardAppearance.dark)
+                ForEach(KeyboardAppearance.allCases, id: \.self) { appearance in
+                    Text(appearance.displayName).tag(appearance)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -130,6 +130,11 @@ struct KeyboardSettingsPanel: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.letterKeyFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(theme.keyGradient(for: .letter), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(theme.keyBorder, lineWidth: theme.keyBorderWidth)
+        }
+        .shadow(color: theme.glowColor, radius: theme.glowRadius)
     }
 }

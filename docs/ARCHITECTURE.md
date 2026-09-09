@@ -89,7 +89,7 @@ See [CLIPBOARD.md](CLIPBOARD.md) for limits and permission behavior.
 
 - haptics;
 - keypress sound;
-- system/light/dark appearance;
+- System/Light/Black/Neon appearance, rendered from one shared set of native surface tokens;
 - clipboard mode;
 - clipboard notice version.
 

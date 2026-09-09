@@ -169,19 +169,27 @@ to launch the host app. Full behavior is in [CLIPBOARD.md](CLIPBOARD.md).
 
 ## 9. Theming
 
-**Starting palettes — derived from Google's Material palette; 📐 MEASURE against screenshots and correct before Phase 3 owner acceptance.**
+The theme system is token-driven: every letter key, function key, pressed state, popup,
+toolbar control, clipboard card and settings surface resolves from the same active
+`KeyboardTheme`. Individual keys never receive one-off colors.
 
-| Element | Light | Dark |
-|---|---|---|
-| Keyboard background | `#F1F3F4` | `#202124` |
-| Letter key fill | `#FFFFFF` | `#3C4043` |
-| Function key fill (⇧, ⌫, `?123`, return) | `#DADCE0` | `#282A2D` |
-| Key label | `#1F1F1F` | `#E8EAED` |
-| Hint glyph (digit hints) | `#5F6368` @ ~60% | `#9AA0A6` @ ~60% |
-| Accent (autocorrect emphasis, pins) | `#1A73E8` | `#8AB4F8` |
-| Popup / callout background | `#FFFFFF` | `#3C4043` |
+| Role | Light | Black | Neon |
+|---|---|---|---|
+| Canvas | `#F6F8FB → #E8EDF3` | `#050506 → #111318` | `#050611 → #0B1020` |
+| Letter key | `#FFFFFF → #F8FAFC` | `#252830 → #15171C` | `#172A40 → #091222` |
+| Function key | `#E8EDF2 → #D5DCE4` | `#181A20 → #090A0D` | `#2A1450 → #10091F` |
+| Label | `#111827` | `#F8FAFC` | `#F4FBFF` |
+| Hint | `#64748B` | `#A3ACBA` | `#7ADFFF` |
+| Accent | `#2563EB` | `#55D6FF` | `#00F0FF` |
+| Border | `#C9D2DC` | `#373B45` | `#7C4DFF` |
 
-**Key borders:** Gboard has a borders on/off toggle. v1 ships one choice; 📐 decide which matches the owner's Android setup.
+**System** follows iOS and resolves to Light or Black. The old persisted `dark` value now
+displays as Black, so installed users keep their preference. Neon uses a 1.6-point shallow
+cyan glow; larger per-key blur is intentionally prohibited until device profiling proves it
+fits the extension budget. Exact tokens and icon semantics are mirrored in `assets/themes/`.
+
+Function icons use a single monoline SF Symbols vocabulary. Dynamic return actions such as
+Send/Search remain text so the field's requested action is never hidden behind a generic icon.
 
 **⚠️ iOS 26 Liquid Glass rule (hard constraint).** The keyboard background must be **transparent** — iOS 26 wraps keyboards in a system rounded-glass container, and an opaque background renders as a gray bar/frame (CONSTRAINTS §8 gotcha ledger). The palette's "keyboard background" value therefore applies to the *fallback*, not as an unconditional opaque fill. Never paint an opaque full-bleed background.
 

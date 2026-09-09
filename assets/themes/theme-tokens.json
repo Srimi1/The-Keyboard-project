@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "runtimeSource": "Sources/Keyboard/KeyboardTheme.swift",
+  "metrics": {
+    "keyCornerRadiusPoints": 7,
+    "keySpacingPoints": 3,
+    "rowSpacingPoints": 6,
+    "keyboardVerticalPaddingPoints": 6,
+    "keyRowHeightPoints": 46,
+    "toolbarHeightPoints": 44
+  },
+  "themes": {
+    "light": {
+      "displayName": "Light",
+      "canvas": ["#F6F8FB", "#E8EDF3"],
+      "letterKey": ["#FFFFFF", "#F8FAFC"],
+      "functionKey": ["#E8EDF2", "#D5DCE4"],
+      "label": "#111827",
+      "hint": "#64748B",
+      "accent": "#2563EB",
+      "onAccent": "#FFFFFF",
+      "popup": "#FFFFFF",
+      "border": "#C9D2DC",
+      "borderWidthPoints": 0.75,
+      "pressedOverlay": "rgba(0,0,0,0.14)",
+      "shadow": "rgba(0,0,0,0.18)",
+      "glow": "transparent"
+    },
+    "black": {
+      "displayName": "Black",
+      "persistedAppearanceValue": "dark",
+      "canvas": ["#050506", "#111318"],
+      "letterKey": ["#252830", "#15171C"],
+      "functionKey": ["#181A20", "#090A0D"],
+      "label": "#F8FAFC",
+      "hint": "#A3ACBA",
+      "accent": "#55D6FF",
+      "onAccent": "#00141B",
+      "popup": "#20232A",
+      "border": "#373B45",
+      "borderWidthPoints": 0.8,
+      "pressedOverlay": "rgba(255,255,255,0.10)",
+      "shadow": "rgba(0,0,0,0.58)",
+      "glow": "transparent"
+    },
+    "neon": {
+      "displayName": "Neon",
+      "canvas": ["#050611", "#0B1020"],
+      "letterKey": ["#172A40", "#091222"],
+      "functionKey": ["#2A1450", "#10091F"],
+      "label": "#F4FBFF",
+      "hint": "#7ADFFF",
+      "accent": "#00F0FF",
+      "onAccent": "#001316",
+      "popup": "#0E1930",
+      "border": "#7C4DFF",
+      "borderWidthPoints": 1,
+      "pressedOverlay": "rgba(0,240,255,0.20)",
+      "shadow": "rgba(0,0,0,0.62)",
+      "glow": "rgba(0,240,255,0.42)",
+      "glowRadiusPoints": 1.6
+    }
+  }
+}

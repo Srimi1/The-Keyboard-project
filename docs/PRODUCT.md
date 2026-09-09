@@ -14,7 +14,7 @@ The first public version is deliberately focused:
 - reliable tap typing, shift/caps, symbols, return variants and hold-to-delete;
 - long-press accents/punctuation and spacebar cursor movement;
 - a real next-keyboard control and usable VoiceOver actions;
-- persistent haptic, sound and system/light/dark preferences;
+- persistent haptic, sound and System/Light/Black/Neon theme preferences;
 - explicit tap-to-save text history with paste, pin/unpin, delete, clear and expiry;
 - offline operation with no accounts, analytics, ads or app-owned networking;
 - useful setup, settings and history management in the host app.

@@ -17,11 +17,12 @@ final class CalibrationProbe: KeyboardUITestCase {
         print("=== WINDOW: \(app.windows.element(boundBy: 0).frame)")
         print("=== KEY AREA: \(keyAreaFrame)  rowHeight=\(rowHeight)")
 
-        // label on screen -> the name keyCenter(_:) knows it by
+        // VoiceOver label -> the name keyCenter(_:) knows it by. Function keys intentionally
+        // expose semantic names rather than their current glyph or SF Symbol.
         let checks: [(onScreen: String, key: String)] = [
             ("q", "q"), ("p", "p"), ("a", "a"), ("l", "l"), ("z", "z"), ("m", "m"),
-            ("⇧", "shift"), ("⌫", "backspace"),
-            ("?123", "layer"), (",", ","), ("English (US)", "space"), (".", "."), ("return", "return"),
+            ("Shift", "shift"), ("Delete", "backspace"),
+            ("Numbers and symbols", "layer"), (",", ","), ("Space", "space"), (".", "."), ("Return", "return"),
         ]
 
         for check in checks {

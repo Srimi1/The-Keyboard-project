@@ -23,7 +23,9 @@ Do not mark a row PASS from the host preview or simulator.
 - [ ] Spacebar movement edits the intended caret position and never triggers a stale paste.
 - [ ] Rotation, panel changes, app switches and 100 appearance/dismissal cycles leave no stuck
   key, deletion repeater, callout or delayed insertion.
-- [ ] Haptic/sound toggles and system/light/dark appearance persist.
+- [ ] Haptic/sound toggles and System/Light/Black/Neon appearance persist.
+- [ ] Every theme keeps labels, hints, function icons, pressed states, popups and panels
+  readable; Neon shows no sustained memory/GPU growth during ordinary typing.
 - [ ] VoiceOver can activate letters, functions, clipboard items and settings; typing remains
   usable with multitouch when VoiceOver is off.
 - [ ] Owner completes one full day without switching because of a keyboard defect and approves

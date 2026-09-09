@@ -72,6 +72,24 @@ final class KeyboardSettingsTests: XCTestCase {
         }
     }
 
+    func testThemeCatalogUsesStableRawValuesAndUserFacingNames() {
+        XCTAssertEqual(KeyboardAppearance.allCases, [.system, .light, .dark, .neon])
+        XCTAssertEqual(KeyboardAppearance.dark.rawValue, "dark")
+        XCTAssertEqual(KeyboardAppearance.dark.displayName, "Black")
+        XCTAssertEqual(KeyboardAppearance.neon.displayName, "Neon")
+    }
+
+    func testNeonThemePersistsAcrossRelaunch() {
+        withStores { store, local, shared in
+            store.refresh(canUseShared: true)
+            store.setAppearance(.neon, at: Date(timeIntervalSince1970: 42))
+
+            let reopened = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            reopened.refresh(canUseShared: true)
+            XCTAssertEqual(reopened.values.appearance, .neon)
+        }
+    }
+
     func testStaleStoreEditMergesNewerChangeFromOtherProcess() {
         withStores { first, local, shared in
             let second = KeyboardSettingsStore(localDefaults: shared, sharedDefaults: shared)
