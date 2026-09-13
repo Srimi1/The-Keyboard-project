@@ -12,8 +12,10 @@ struct RootView: View {
     @StateObject private var clipboard: ClipboardController
     @Environment(\.scenePhase) private var scenePhase
     @State private var scratchText = ""
+    @State private var showingSetup = false
     private let testingClipboardText: String?
     private let testingNow: Date?
+    private let clipboardRepository: ClipboardRepository
 
     init() {
         #if DEBUG
@@ -45,6 +47,7 @@ struct RootView: View {
             repository = ClipboardRepository()
         }
         _settings = StateObject(wrappedValue: settings)
+        clipboardRepository = repository
         let clock: @Sendable () -> Date
         if let testNow {
             clock = { testNow }
@@ -60,9 +63,11 @@ struct RootView: View {
         testingNow = testNow
         #else
         let settings = KeyboardSettingsStore()
+        let repository = ClipboardRepository()
+        clipboardRepository = repository
         _settings = StateObject(wrappedValue: settings)
         _clipboard = StateObject(wrappedValue: ClipboardController(
-            repository: ClipboardRepository(),
+            repository: repository,
             settings: settings,
             now: { Date() }
         ))
@@ -74,7 +79,16 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             List {
-                setupSection
+                if !settings.values.hasCompletedSetup || showingSetup {
+                    setupSection
+                } else {
+                    Section {
+                        Button("Review keyboard setup") { showingSetup = true }
+                            .accessibilityIdentifier("host.setup.review")
+                    } footer: {
+                        Text("Your setup choices are saved. Switch to Keyboard Project with the globe key in any app that supports custom keyboards.")
+                    }
+                }
                 settingsSection
                 clipboardSection
                 #if DEBUG
@@ -94,6 +108,7 @@ struct RootView: View {
             diagnostics.refresh()
             settings.refresh(canUseShared: true)
             clipboard.activate(.hostApp)
+            rememberCompletedSetup()
         }
         // Explicit `perform:` selects the single-value overload; the zero- and
         // two-parameter forms of onChange are iOS 17+.
@@ -105,6 +120,7 @@ struct RootView: View {
                 diagnostics.refresh()
                 settings.refresh(canUseShared: true)
                 clipboard.activate(.hostApp)
+                rememberCompletedSetup()
             } else if phase == .background {
                 // A system Paste permission sheet temporarily makes the app inactive. The
                 // provider transfer must survive that transition; only a real backgrounding
@@ -153,12 +169,34 @@ struct RootView: View {
                     Label("Open this app's Settings page", systemImage: "gear")
                 }
             }
+            if !settings.values.hasAcceptedClipboardNotice {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Optional: Clipboard history").font(.subheadline.weight(.semibold))
+                    Text("Only text you save with Paste is kept on this iPhone. Recent clips expire after one hour; pinned clips stay until deleted. Nothing is uploaded.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Enable tap-to-save") { settings.acceptClipboardNotice() }
+                        .accessibilityIdentifier("host.setup.clipboard")
+                }
+            }
+            Button(settings.values.hasCompletedSetup ? "Done" : "Continue to keyboard app") {
+                settings.completeSetup()
+                showingSetup = false
+            }
+            .accessibilityIdentifier("host.setup.continue")
         } header: {
             Text("Setup")
         } footer: {
             // Honest about the limit: there is no public deep link to the Keyboards list, and
             // launching Settings is the only app a keyboard may open at all (C-30, 4.4.1).
-            Text("The button opens this app's Settings page. Adding the keyboard still has to be done from the Keyboards screen. After setup, switch with the globe key.")
+            Text("iOS requires you to add the keyboard in Settings once. Full Access and clipboard history are optional; you can continue and finish setup later.")
+        }
+    }
+
+    private func rememberCompletedSetup() {
+        // A handshake confirms past use, not current permission. Never infer Full Access
+        // from this flag; the extension continues to check the system on activation.
+        if diagnostics.keyboardHasRun == .done && !settings.values.hasCompletedSetup {
+            settings.completeSetup()
         }
     }
 
@@ -173,7 +211,7 @@ struct RootView: View {
     private var previewSection: some View {
         Section {
             NavigationLink {
-                KeyboardPreviewView()
+                KeyboardPreviewView(settings: settings, repository: clipboardRepository)
             } label: {
                 Label("Keyboard preview", systemImage: "keyboard")
             }
@@ -286,7 +324,7 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Nothing you type leaves this phone", systemImage: "lock.fill")
                     .font(.subheadline.weight(.semibold))
-                Text("The keyboard has no network code at all — not for sync, not analytics, not crash reporting (ADR-005). There are no accounts and no servers. Clipboard history and settings are stored only in this app's shared container on this device, and are deleted when you delete the app.")
+                Text("No accounts, ads, analytics, or uploads. Only text you choose to save enters clipboard history, which stays on this iPhone and is excluded from backups. You can delete saved clips at any time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -349,7 +387,7 @@ struct RootView: View {
                     labeled("Pasteboard", outcome)
                 }
             } else {
-                Text("No keyboard report yet — switch to the keyboard and tap Diagnostics in its strip.")
+                Text("No keyboard report yet — switch to the keyboard, open Keyboard settings, then Developer diagnostics.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

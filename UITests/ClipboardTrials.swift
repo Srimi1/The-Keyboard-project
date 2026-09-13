@@ -21,7 +21,7 @@ final class ClipboardTrials: KeyboardUITestCase {
         let row = app.buttons
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Clipboard history"))
             .firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 20), "Clipboard history row did not appear")
+        XCTAssertTrue(app.navigationBars["Keyboard Project"].waitForExistence(timeout: 20))
         scrollUntilHittable(row)
         row.tap()
         XCTAssertTrue(app.navigationBars["Clipboard"].waitForExistence(timeout: 10))
@@ -74,5 +74,110 @@ final class ClipboardTrials: KeyboardUITestCase {
 
         let entries = app.staticTexts.matching(identifier: copied)
         XCTAssertEqual(entries.count, 1, "Repeated explicit saves must leave one entry")
+    }
+
+    func testKeyboardClipboardPastesAndClearsInsideKeyboardAndRemembersConsent() {
+        let copied = "Keyboard clipboard fixture"
+        launchClipboard(fixtureText: copied)
+        acceptNoticeIfNeeded()
+        app.buttons["host.clipboard.save"].tap()
+        XCTAssertTrue(app.staticTexts[copied].waitForExistence(timeout: 10))
+        app.navigationBars["Clipboard"].buttons.element(boundBy: 0).tap()
+        let preview = app.buttons["Keyboard preview"].firstMatch
+        scrollUntilHittable(preview)
+        preview.tap()
+        let clipboard = app.buttons["keyboard.toolbar.clipboard"]
+        XCTAssertTrue(clipboard.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.images["stethoscope"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "globe ")).firstMatch.exists)
+        clipboard.tap()
+        XCTAssertFalse(app.buttons["keyboard.clipboard.enable"].exists)
+        let clip = app.buttons[copied]
+        XCTAssertTrue(clip.waitForExistence(timeout: 10))
+        clip.tap()
+        let inserted = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", copied),
+            object: app.staticTexts["keyboard.preview.text"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [inserted], timeout: 5), .completed)
+        app.buttons["keyboard.clipboard.clear"].tap()
+        app.buttons["Delete everything"].tap()
+        XCTAssertTrue(app.staticTexts["Nothing saved yet"].waitForExistence(timeout: 10))
+        app.buttons["keyboard.clipboard.back"].tap()
+        clipboard.tap()
+        XCTAssertFalse(app.buttons["keyboard.clipboard.enable"].exists)
+        XCTAssertTrue(app.staticTexts["Nothing saved yet"].exists)
+    }
+
+    func testKeyboardClipboardPinDeleteAndRepeatedPanelSwitches() {
+        let copied = "Repeat validation clip"
+        launchClipboard(fixtureText: copied)
+        acceptNoticeIfNeeded()
+        app.buttons["host.clipboard.save"].tap()
+        XCTAssertTrue(app.staticTexts[copied].waitForExistence(timeout: 10))
+        app.navigationBars["Clipboard"].buttons.element(boundBy: 0).tap()
+        let preview = app.buttons["Keyboard preview"].firstMatch
+        scrollUntilHittable(preview)
+        preview.tap()
+        let clipboard = app.buttons["keyboard.toolbar.clipboard"]
+        XCTAssertTrue(clipboard.waitForExistence(timeout: 10))
+        clipboard.tap()
+        let clip = app.buttons[copied]
+        XCTAssertTrue(clip.waitForExistence(timeout: 10))
+
+        clip.press(forDuration: 1)
+        app.buttons["Pin"].tap()
+        XCTAssertTrue(app.staticTexts["PINNED"].waitForExistence(timeout: 5))
+        app.buttons["keyboard.clipboard.clear"].tap()
+        XCTAssertTrue(app.buttons["Delete everything"].waitForExistence(timeout: 5))
+        let confirmation = XCTAttachment(screenshot: app.screenshot())
+        confirmation.name = "Clear-all confirmation"
+        confirmation.lifetime = .keepAlways
+        add(confirmation)
+        if app.buttons["Cancel"].exists {
+            app.buttons["Cancel"].tap()
+        } else {
+            // iOS can present a popover with outside-tap dismissal instead of a
+            // Cancel row. The preview text is outside the keyboard and has no action.
+            let outside = app.staticTexts["keyboard.preview.text"].frame
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: outside.midX, dy: outside.midY)).tap()
+        }
+        let dismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["Delete everything"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+        XCTAssertTrue(clip.exists, "Cancelling clear-all must preserve pinned clips")
+
+        for _ in 0..<5 {
+            app.buttons["keyboard.clipboard.back"].tap()
+            app.buttons["keyboard.toolbar.settings"].tap()
+            XCTAssertTrue(app.switches["Adaptive haptics"].waitForExistence(timeout: 5))
+            clipboard.tap()
+            XCTAssertTrue(clip.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["keyboard.clipboard.enable"].exists)
+        }
+
+        clip.press(forDuration: 1)
+        app.buttons["Unpin"].tap()
+        XCTAssertTrue(app.staticTexts["RECENT · EXPIRES AFTER 1 HOUR"].waitForExistence(timeout: 5))
+        clip.press(forDuration: 1)
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Nothing saved yet"].waitForExistence(timeout: 5))
+        XCTAssertFalse(clip.exists)
+        app.buttons["keyboard.clipboard.back"].tap()
+        clipboard.tap()
+        XCTAssertTrue(app.staticTexts["Nothing saved yet"].exists)
+        app.buttons["keyboard.clipboard.back"].tap()
+        let key = app.descendants(matching: .any)["keyboard.key-a"].firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 5))
+        key.tap()
+        XCTAssertEqual(app.staticTexts["keyboard.preview.text"].label, "A",
+                       "Typing must still work after repeated panel changes; menu actions must not paste a clip")
+        let keyboard = XCTAttachment(screenshot: app.screenshot())
+        keyboard.name = "Typing after repeated panel switches"
+        keyboard.lifetime = .keepAlways
+        add(keyboard)
     }
 }

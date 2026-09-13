@@ -129,3 +129,19 @@ The following remain physical-device gates:
 - reinstall retention.
 
 Record those results in [DEVICE-ACCEPTANCE.md](DEVICE-ACCEPTANCE.md).
+
+## v1 interaction refinement — 2026-09-13
+
+The toolbar clipboard control opens the history panel in the keyboard. The system control
+is visibly labelled **Paste**: tapping it saves copied text; tapping a saved card inserts
+it into the active document. Hold a card to pin/unpin or delete. Clear-all is available
+in the panel with confirmation. Consent persists across launches and is shared with the
+extension when Full Access is available. Without Full Access the panel shows an explanation
+before offering consent; no cached clips are displayed or inserted.
+
+Reference: [Google's Gboard clipboard help](https://support.google.com/gboard/answer/10742542?hl=en),
+reviewed 2026-09-13, documents the keyboard toolbar entry, tap-to-paste, back navigation,
+and long-press pinning. This is an iOS adaptation, not a copy of Gboard internals or its
+Android automatic-capture behavior. [Apple's UIPasteControl documentation](https://developer.apple.com/documentation/uikit/uipastecontrol)
+explains explicit paste access. The existing one-hour retention remains our v1 contract;
+Google's help page only specifies temporary history, not an exact duration.

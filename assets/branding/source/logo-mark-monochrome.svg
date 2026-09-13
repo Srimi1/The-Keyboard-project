@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Four keyboard forms protect a central insertion caret">
+  <g fill="#000000">
+    <rect x="72" y="72" width="168" height="168" rx="36"/>
+    <rect x="272" y="72" width="168" height="168" rx="36"/>
+    <path d="M88 272h136c9 0 16 7 16 16v152c0 12-12 20-23 15l-51-23c-58-26-94-82-94-144 0-9 7-16 16-16Z"/>
+    <path d="M288 272h136c9 0 16 7 16 16 0 62-36 118-94 144l-51 23c-11 5-23-3-23-15V288c0-9 7-16 16-16Z"/>
+  </g>
+</svg>

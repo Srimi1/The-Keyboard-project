@@ -19,8 +19,18 @@ versioning after its first public release.
   checks and a release-evidence gate.
 - Physical-device deploy workflow that verifies signing, profiles and App Group entitlements,
   installs with `devicectl`, confirms installation and launches the host app.
+- Token-driven interactive motion (`KeyboardMotion.swift`): key press/release, key-preview
+  popup and long-press callout appear/dismiss, panel switches, toolbar active state, the
+  paste chip and Light/Black/Neon theme swaps now animate instead of snapping, scoped to
+  never keep an outgoing panel's touch surface mounted during a transition, and collapsing
+  to instant cuts under Reduce Motion.
 
 ### Changed
+
+- Remember setup completion while keeping optional clipboard consent separate and reviewable.
+- Remove debug metrics and the stethoscope from the keyboard toolbar; diagnostics remain in Debug settings.
+- Add adaptive haptic intensity and enable system key clicks for new installs, preserving saved preferences.
+- Put confirmed clear-all, paste instructions, and privacy details inside the keyboard.
 
 - v1 is now explicitly iPhone-first, English (US), offline and dependency-free.
 - Clipboard access is manual-first. Opening or foregrounding either target never reads a
@@ -41,6 +51,8 @@ versioning after its first public release.
 - Corrupt/future/oversized storage reset, speculative-backup recovery and temporary-file
   cleanup without silently replacing unreadable history.
 - CI destination/error handling and device deployment that previously built without installing.
+- Local working tree and `.git` object-store data loss from an iCloud Drive sync fault
+  (KB-015): 25 tracked files and most of the object database recovered from `origin/main`.
 
 ## 0.1.0 — 2026-08-21
 

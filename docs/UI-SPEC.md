@@ -72,7 +72,8 @@ Gboard's "Popup on keypress" (on by default on Android): an enlarged copy of the
 
 - Not shown for spacebar, shift, backspace, return, or layer keys — letters and punctuation only.
 - On the top row (no space above), the popup renders above the keyboard's top edge, overlapping the suggestion strip.
-- **📐 MEASURE:** popup size relative to the key, offset above it, corner radius, and appear/dismiss animation timing.
+- **Implemented:** appear scales in from the key (0.85→1.0) with a light spring overshoot; dismiss is a plain, quicker fade — `KeyboardMotion.popupAppear`/`.popupDismiss` in `Sources/Keyboard/KeyboardMotion.swift`. Respects Reduce Motion (collapses to an instant cut).
+- **📐 MEASURE:** popup size relative to the key, offset above it, corner radius, and whether the implemented appear/dismiss curve above actually matches Gboard's.
 
 ## 5. Long-press map
 
@@ -187,6 +188,9 @@ toolbar control, clipboard card and settings surface resolves from the same acti
 displays as Black, so installed users keep their preference. Neon uses a 1.6-point shallow
 cyan glow; larger per-key blur is intentionally prohibited until device profiling proves it
 fits the extension budget. Exact tokens and icon semantics are mirrored in `assets/themes/`.
+Switching Light/Black/Neon/System crossfades every key's fill, border and label color over
+~220ms (`KeyboardMotion.themeChange`) instead of snapping; still just color interpolation, no
+added blur or layout change, so it costs nothing against the glow budget above.
 
 Function icons use a single monoline SF Symbols vocabulary. Dynamic return actions such as
 Send/Search remain text so the field's requested action is never hidden behind a generic icon.
@@ -197,12 +201,17 @@ Send/Search remain text so the field's requested action is never hidden behind a
 
 | Event | Haptic | Sound |
 |---|---|---|
-| Letter key | light impact | key click |
-| Function key (⇧, layer, return) | light impact | key click (📐 verify Gboard differentiates) |
-| Backspace (each repeat) | light impact, possibly suppressed during fast repeat | click, 📐 verify suppression |
+| Letter key | light impact, softer during rapid typing | system key click |
+| Function key (⇧, layer, return) | distinct intensity by action | system key click |
+| Backspace | impact on initial press; repeat is silent | initial system click |
 | Long-press callout open | selection change | none |
 
 Both haptics and sound **no-op without Full Access** (C-07, C-08) — feature-gate on `hasFullAccess`. Use `UIDevice.current.playInputClick()`, not `AVAudioPlayer` (wrong audio bus in extensions, C-08), paired with a `UIInputViewAudioFeedback` conformance on the `UIInputView` itself, not the controller (C-50). Without Full Access, `playInputClick` has also been reported to hang rather than no-op silently (C-51) — the `hasFullAccess` gate is mandatory, not optional hygiene.
+
+New installs enable haptics and sound; existing saved preferences are retained. Haptic
+intensities are product choices, not measured Gboard values: letters 0.4, delete 0.55,
+shift/layer 0.6, space 0.65, return 0.85. Taps less than 120 ms apart use 65% intensity.
+Device comfort and sound/silent-mode behavior remain acceptance checks.
 
 ## 11. Keyboard height
 
@@ -229,6 +238,7 @@ Capture these from the owner's real Android Gboard setup before **Phase 3 owner 
 | V-09 | v1 clipboard/settings toolbar and post-save paste chip | Phase 3 |
 | V-10 | Clipboard panel: populated, empty, with pinned items | Phase 3 |
 | V-11 | Keyboard total height vs. screen, portrait | Phase 3 |
+| V-12 | Implemented key-press/release, popup, panel-switch and theme-swap motion curves (`Sources/Keyboard/KeyboardMotion.swift`) against Gboard's actual timing — currently considered defaults, not measured | Phase 3 |
 
 ---
 

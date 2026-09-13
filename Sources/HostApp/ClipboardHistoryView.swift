@@ -142,7 +142,7 @@ struct ClipboardHistoryView: View {
             Text("Save")
         } footer: {
             if settings.values.hasAcceptedClipboardNotice {
-                Text("Automatic capture is unavailable until its permission and password-manager tests pass on a physical iPhone.")
+                Text("Tap Paste to save copied text. Nothing is captured automatically. Your consent is remembered until you reset the app's data.")
             }
         }
     }

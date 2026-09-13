@@ -47,7 +47,7 @@ class KeyboardUITestCase: XCTestCase {
         app.launch()
 
         let row = app.buttons["Keyboard preview"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 20), "The 'Keyboard preview' row never appeared")
+        XCTAssertTrue(app.navigationBars["Keyboard Project"].waitForExistence(timeout: 20))
         scrollUntilHittable(row)
         row.tap()
 

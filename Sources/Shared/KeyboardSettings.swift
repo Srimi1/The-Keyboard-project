@@ -30,10 +30,14 @@ nonisolated struct KeyboardSettings: Codable, Equatable, Sendable {
     var schemaVersion = currentSchemaVersion
     var updatedAt = Date.distantPast
     var hapticsEnabled = true
-    var soundEnabled = false
+    var soundEnabled = true
     var appearance = KeyboardAppearance.system
     var clipboardCaptureMode = ClipboardCaptureMode.manual
     var clipboardNoticeVersion = 0
+    // Optional for backwards-compatible decoding of the original v1 settings document.
+    var setupCompleted: Bool? = nil
+
+    var hasCompletedSetup: Bool { setupCompleted == true }
 
     var hasAcceptedClipboardNotice: Bool {
         clipboardNoticeVersion >= Self.currentClipboardNoticeVersion
@@ -127,6 +131,10 @@ final class KeyboardSettingsStore: ObservableObject {
             $0.clipboardNoticeVersion = KeyboardSettings.currentClipboardNoticeVersion
             if $0.clipboardCaptureMode == .off { $0.clipboardCaptureMode = .manual }
         }
+    }
+
+    func completeSetup(at now: Date = Date()) {
+        update(at: now) { $0.setupCompleted = true }
     }
 
     private func update(at now: Date, mutation: (inout KeyboardSettings) -> Void) {

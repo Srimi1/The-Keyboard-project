@@ -91,12 +91,13 @@ See [CLIPBOARD.md](CLIPBOARD.md) for limits and permission behavior.
 - keypress sound;
 - System/Light/Black/Neon appearance, rendered from one shared set of native surface tokens;
 - clipboard mode;
-- clipboard notice version.
+- clipboard notice version;
+- optional setup-completed flag (missing in legacy v1 documents).
 
 The whole newer record wins, and stores refresh immediately before each field edit. When
 shared defaults are reachable, the selected record is reconciled into both shared and
 process-local defaults. This keeps basic preferences
-available after Full Access is revoked. Defaults are haptics on, sound off, system
+available after Full Access is revoked. Defaults are adaptive haptics on, sound on for new installs, system
 appearance and manual clipboard mode gated by the retention notice.
 
 Automatic clipboard capture cannot currently be enabled, including from a stale stored

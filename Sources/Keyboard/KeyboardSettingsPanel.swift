@@ -17,6 +17,11 @@ struct KeyboardSettingsPanel: View {
                     feedbackCard
                     appearanceCard
                     clipboardCard
+                    privacyCard
+                    #if DEBUG
+                    Button("Developer diagnostics") { model.showPanel(.diagnostics) }
+                        .font(.system(size: 11))
+                    #endif
                     if let error = settings.persistenceError {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
@@ -64,7 +69,7 @@ struct KeyboardSettingsPanel: View {
 
     private var feedbackCard: some View {
         settingsCard("Feedback") {
-            Toggle("Haptic feedback", isOn: Binding(
+            Toggle("Adaptive haptics", isOn: Binding(
                 get: { settings.values.hapticsEnabled },
                 set: { model.setHapticsEnabled($0) }
             ))
@@ -72,6 +77,9 @@ struct KeyboardSettingsPanel: View {
                 get: { settings.values.soundEnabled },
                 set: { model.setSoundEnabled($0) }
             ))
+            Text("Haptics soften as you type faster. Clicks follow the system sound settings. Both need Full Access.")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.hintGlyph)
         }
     }
 
@@ -97,7 +105,7 @@ struct KeyboardSettingsPanel: View {
                     get: { settings.values.effectiveClipboardCaptureMode != .off },
                     set: { model.setClipboardCaptureMode($0 ? .manual : .off) }
                 ))
-                Text("Automatic capture stays unavailable until paste permissions and password-manager behavior pass on-device tests.")
+                Text("Tap Paste in Clipboard to save copied text. Nothing is captured automatically.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.hintGlyph)
             } else {
@@ -113,6 +121,16 @@ struct KeyboardSettingsPanel: View {
                     .font(.system(size: 11, weight: .semibold))
                     .disabled(clipboard.isBusy)
             }
+        }
+    }
+
+    private var privacyCard: some View {
+        settingsCard("Privacy") {
+            Text("No accounts, ads, analytics, or uploads. Saved clips stay on this iPhone and are excluded from backups. Recent clips expire after one hour; pinned clips remain until deleted.")
+                .font(.system(size: 11))
+            Text("Full Access is optional for typing. Clipboard history and feedback use it; this keyboard has no network code.")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.hintGlyph)
         }
     }
 

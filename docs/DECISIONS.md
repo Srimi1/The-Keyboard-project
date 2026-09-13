@@ -257,6 +257,63 @@ must supply the full token set and a real-render preview rather than recoloring 
 
 ---
 
+## ADR-017 — Interactive state changes get explicit motion, scoped away from the touch layer
+
+**Date:** 2026-09-10 · **Status:** Accepted
+
+**Context.** Every state-driven visual change — key press/release, the key-preview popup, the
+long-press callout, panel switches (keys/clipboard/settings/diagnostics), toolbar active
+state and theme swaps — rendered as a hard, unanimated cut; UI-SPEC.md §4 already flagged
+popup appear/dismiss timing as unmeasured-but-expected. The owner separately reported the
+keyboard's overall feel as insufficiently smooth. A naive fix — wrap the whole
+`KeyboardRootView` subtree in one ambient `.animation(value: model.panel)` — was rejected: a
+shared crossfade keeps the *outgoing* panel mounted, and therefore hit-testable, for the
+animation's duration. For `.clipboard`/`.settings` that is a stray tap target; for `.keys` it
+means `TouchTracker`'s raw multi-touch layer (UI-SPEC.md §3) could coexist with another
+panel's controls, which this project's own touch-race history (KB-001/KB-004) makes an
+unacceptable trade for a decorative crossfade.
+
+**Decision.** Add `Sources/Keyboard/KeyboardMotion.swift` as the one place curves live,
+mirroring `KeyboardTheme`/`KeyboardTimings`. Every curve is opacity/scale/color only — no
+added blur, matching the Neon glow-budget constraint (UI-SPEC.md §9). Panel switches use an
+*insertion-only* fade (`KeyboardRootView.fadeInOnAppear()`): the incoming clipboard/settings/
+diagnostics panel eases its own opacity in via local `@State` on `onAppear`, while removal of
+the outgoing panel stays synchronous and unanimated — `.keys` itself never fades, since typing
+must stay instantly hit-testable and is where most time is spent. Every curve resolves to
+`nil` under `accessibilityReduceMotion` rather than a zero-duration animation.
+
+**Consequences.** The keyboard now visibly eases through state changes without adding any
+animated coexistence to the touch-critical key surface — `TypingTrials`, `LayerTrials`,
+`BackspaceTrials` and `ClipboardTrials` (which exercise real synthesized touches through this
+exact code) all pass unchanged. UI-SPEC.md §4/§9/§12 (V-12) now record these as implemented,
+considered defaults still awaiting a real-device Gboard comparison, not sourced constants.
+---
+
+## ADR-018 — Remember setup and keep the keyboard toolbar focused on typing
+
+**Date:** 2026-09-13 · **Status:** Accepted
+
+**Context.** The owner requested a simpler first version: remove the stethoscope control,
+keep clipboard actions inside the keyboard, remember setup, and provide adaptive haptics
+and audible clicks. A Debug build was exposing development metrics in the typing toolbar.
+
+**Decision.** Supersedes ADR-011's visible Debug toolbar instrumentation placement: diagnostics
+remain Debug-only but move behind Keyboard settings as a text action. Extends ADR-015's
+clipboard/settings-only toolbar to Debug. Retain the existing native keyboard rather than
+rewrite its tested touch and storage foundations. Remember setup completion separately from
+clipboard consent and system Full Access. iOS still owns keyboard installation and access.
+An optional field preserves legacy settings decoding; existing sound choices remain intact.
+New installs enable system clicks; adaptive haptics vary by action and soften with rapid taps.
+Clear-all and privacy instructions are reachable inside the keyboard. ADR-013 explicit capture
+and ADR-014 deferred suggestions/autocorrect remain in force.
+
+**Consequences.** No background clipboard capture or extension-to-app launch. Setup can be
+skipped and reopened; skipping does not grant clipboard consent. Sound/haptic comfort,
+permission revocation and retention across real extension lifetimes require physical-device
+acceptance. No automatic permission grant or suppression of system security prompts is claimed.
+
+---
+
 ## Template for new ADRs
 
 ```markdown

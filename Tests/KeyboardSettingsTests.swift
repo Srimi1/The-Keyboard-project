@@ -7,7 +7,7 @@ final class KeyboardSettingsTests: XCTestCase {
     func testDefaultsAreManualButRequireNoticeAcceptance() {
         withStores { store, _, _ in
             XCTAssertTrue(store.values.hapticsEnabled)
-            XCTAssertFalse(store.values.soundEnabled)
+            XCTAssertTrue(store.values.soundEnabled)
             XCTAssertEqual(store.values.appearance, .system)
             XCTAssertEqual(store.values.clipboardCaptureMode, .manual)
             XCTAssertEqual(store.values.effectiveClipboardCaptureMode, .off)
@@ -103,6 +103,53 @@ final class KeyboardSettingsTests: XCTestCase {
             reopened.refresh(canUseShared: true)
             XCTAssertFalse(reopened.values.hapticsEnabled)
             XCTAssertTrue(reopened.values.soundEnabled)
+        }
+    }
+
+    func testSetupCompletionDoesNotGrantClipboardConsentAndSurvivesRelaunch() {
+        withStores { store, local, shared in
+            store.refresh(canUseShared: true)
+            store.completeSetup()
+            let reopened = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            reopened.refresh(canUseShared: true)
+            XCTAssertTrue(reopened.values.hasCompletedSetup)
+            XCTAssertFalse(reopened.values.hasAcceptedClipboardNotice)
+        }
+    }
+
+    func testLegacySettingsKeepSoundPreferenceAndConsentWhenSetupFieldIsMissing() throws {
+        var legacy = KeyboardSettings()
+        legacy.soundEnabled = false
+        legacy.clipboardNoticeVersion = KeyboardSettings.currentClipboardNoticeVersion
+        legacy.appearance = .neon
+        let data = try JSONEncoder().encode(legacy)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "setupCompleted")
+        let oldData = try JSONSerialization.data(withJSONObject: json)
+        withStores { _, local, shared in
+            local.set(oldData, forKey: "keyboard.settings.v1")
+            let reopened = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            reopened.refresh(canUseShared: false)
+            XCTAssertFalse(reopened.values.hasCompletedSetup)
+            XCTAssertFalse(reopened.values.soundEnabled)
+            XCTAssertTrue(reopened.values.hasAcceptedClipboardNotice)
+            XCTAssertEqual(reopened.values.appearance, .neon)
+        }
+    }
+
+    func testClipboardConsentSurvivesExtensionRelaunchAndAccessRevocation() {
+        withStores { host, _, shared in
+            host.refresh(canUseShared: true)
+            host.acceptClipboardNotice()
+            let domain = "KeyboardProjectTests.extension.\(UUID().uuidString)"
+            let local = UserDefaults(suiteName: domain)!
+            defer { UserDefaults.standard.removePersistentDomain(forName: domain) }
+            let keyboard = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            keyboard.refresh(canUseShared: true)
+            XCTAssertTrue(keyboard.values.hasAcceptedClipboardNotice)
+            let reopened = KeyboardSettingsStore(localDefaults: local, sharedDefaults: shared)
+            reopened.refresh(canUseShared: false)
+            XCTAssertTrue(reopened.values.hasAcceptedClipboardNotice)
         }
     }
 

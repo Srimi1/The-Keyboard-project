@@ -25,7 +25,8 @@ the current iOS release must be demonstrated before App Store submission.
 - iPhone only, English (US)
 - Offline operation with no accounts, analytics, advertising or app-owned networking
 - Native four-row keyboard with a real system next-keyboard button
-- Haptic setting on by default, sound off by default and system appearance by default
+- Adaptive haptics and system key clicks on by default for new installs; existing preferences preserved
+- Setup choices remembered across launches; optional permissions can be reviewed later
 - Selectable Light, Black and Neon themes with unified key, toolbar, popup and panel styling
 - Persistent tap-to-save clipboard history with pin, unpin, delete and clear-all controls
 - Typing and next-keyboard switching without Full Access

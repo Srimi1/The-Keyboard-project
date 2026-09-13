@@ -9,10 +9,12 @@ struct KeyboardSettingsView: View {
     var body: some View {
         Form {
             Section("Feedback") {
-                Toggle("Haptic feedback", isOn: Binding(
+                Toggle("Adaptive haptics", isOn: Binding(
                     get: { settings.values.hapticsEnabled },
                     set: { settings.setHapticsEnabled($0) }
                 ))
+                Text("Haptics soften during fast typing and distinguish letters, space, return, and delete. System key clicks respect your sound settings. Both require Full Access in the keyboard.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Keypress sound", isOn: Binding(
                     get: { settings.values.soundEnabled },
                     set: { settings.setSoundEnabled($0) }
@@ -46,6 +48,8 @@ struct KeyboardSettingsView: View {
                         set: { settings.setClipboardCaptureMode($0 ? .manual : .off) }
                     ))
                 } else {
+                    Text("Only text you save with Paste stays on this iPhone. Recent clips expire after one hour; pinned clips stay until deleted. Nothing is uploaded.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button("Enable tap-to-save") { settings.acceptClipboardNotice() }
                 }
 
@@ -58,7 +62,7 @@ struct KeyboardSettingsView: View {
             } header: {
                 Text("Clipboard")
             } footer: {
-                Text("Clipboard history is local and manual-first. Automatic capture remains unavailable until physical-device privacy tests pass.")
+                Text("Open Clipboard on the keyboard, tap Paste to save copied text, then tap a clip to insert it. Nothing is captured automatically.")
             }
 
             if let error = settings.persistenceError {

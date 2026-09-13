@@ -7,6 +7,8 @@ struct ClipboardPanel: View {
     @ObservedObject var clipboard: ClipboardController
     @ObservedObject var settings: KeyboardSettingsStore
     let theme: KeyboardTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var confirmingClear = false
 
     private var sections: (pinned: [ClipboardItem], recent: [ClipboardItem]) {
         clipboard.history.visible(at: Date())
@@ -25,10 +27,10 @@ struct ClipboardPanel: View {
                 statusBanner(notice, systemImage: "info.circle.fill", color: theme.accent)
             }
 
-            if !settings.values.hasAcceptedClipboardNotice {
-                consentState
-            } else if clipboard.needsFullAccess && isEmpty {
+            if clipboard.needsFullAccess {
                 noAccessState
+            } else if !settings.values.hasAcceptedClipboardNotice {
+                consentState
             } else if settings.values.effectiveClipboardCaptureMode == .off && isEmpty {
                 captureOffState
             } else if isEmpty {
@@ -36,6 +38,12 @@ struct ClipboardPanel: View {
             } else {
                 itemGrid
             }
+        }
+        .confirmationDialog("Delete all clipboard history?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Delete everything", role: .destructive) { clipboard.clear() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Pinned clips are deleted too. This cannot be undone.")
         }
     }
 
@@ -58,6 +66,21 @@ struct ClipboardPanel: View {
 
             Spacer(minLength: 4)
 
+            if clipboard.isBusy {
+                ProgressView().accessibilityLabel("Updating clipboard")
+            }
+
+            if clipboard.canClearStorage && !isEmpty {
+                Button { confirmingClear = true } label: {
+                    Image(systemName: "trash").frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.hintGlyph)
+                .disabled(clipboard.isBusy)
+                .accessibilityLabel("Clear all clipboard history")
+                .accessibilityIdentifier("keyboard.clipboard.clear")
+            }
+
             if clipboard.canSave {
                 PasteButton(supportedContentTypes: [.plainText]) { providers in
                     clipboard.save(itemProviders: providers)
@@ -76,19 +99,17 @@ struct ClipboardPanel: View {
 
     private var itemGrid: some View {
         VStack(spacing: 0) {
-            if clipboard.needsFullAccess {
-                statusBanner(
-                    "Full Access is off. Cached items can still be pasted, but new items cannot be saved.",
-                    systemImage: "lock.fill",
-                    color: theme.hintGlyph
-                )
-            } else if settings.values.effectiveClipboardCaptureMode == .off {
+            if settings.values.effectiveClipboardCaptureMode == .off {
                 statusBanner(
                     "Saving is off. Existing history stays available until you clear it.",
                     systemImage: "pause.circle.fill",
                     color: theme.hintGlyph
                 )
             }
+            Text("Tap a clip to paste · Hold to pin or delete")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.hintGlyph)
+                .padding(.bottom, 4)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -97,10 +118,14 @@ struct ClipboardPanel: View {
                         grid(for: sections.pinned)
                     }
                     if !sections.recent.isEmpty {
-                        sectionHeader("RECENT")
+                        sectionHeader("RECENT · EXPIRES AFTER 1 HOUR")
                         grid(for: sections.recent)
                     }
                 }
+                // Pinning moves a card between sections and deleting removes one; animating
+                // on the history itself (rather than each section separately) keeps both
+                // sides of a pin move in the same transaction instead of desyncing.
+                .animation(KeyboardMotion.resolved(KeyboardMotion.listChange, reduceMotion: reduceMotion), value: clipboard.history)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
@@ -120,6 +145,7 @@ struct ClipboardPanel: View {
                 } onDelete: {
                     clipboard.delete(id: item.id)
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
     }
@@ -150,7 +176,7 @@ struct ClipboardPanel: View {
         message(
             icon: "doc.on.clipboard",
             title: "Nothing saved yet",
-            detail: "Tap Save after copying text. Automatic capture stays off until its privacy behavior is verified on your iPhone."
+            detail: "Copy text, then tap Paste above to save it here. Tap a saved clip to insert it. Recent clips expire after one hour; pin a clip to keep it. Nothing is captured automatically."
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

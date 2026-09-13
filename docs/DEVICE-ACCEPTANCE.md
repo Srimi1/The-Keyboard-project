@@ -14,6 +14,9 @@ Do not mark a row PASS from the host preview or simulator.
 - [ ] Password-manager, concealed and local/expiring provider trials do not retain secrets.
 - [ ] In-place redeploy retains a named setting and harmless test history item.
 
+- [ ] Setup completion and accepted clipboard notice survive force-quit/relaunch and in-place install; skipping setup never grants consent.
+- [ ] Clipboard panel remains in the real keyboard through save, insert, pin, delete and confirmed clear-all.
+
 ## Typing and accessibility
 
 - [ ] Notes: ordinary prose, caps lock, double-space/backspace, selection moves and long delete.
@@ -24,6 +27,7 @@ Do not mark a row PASS from the host preview or simulator.
 - [ ] Rotation, panel changes, app switches and 100 appearance/dismissal cycles leave no stuck
   key, deletion repeater, callout or delayed insertion.
 - [ ] Haptic/sound toggles and System/Light/Black/Neon appearance persist.
+- [ ] Adaptive haptics soften during rapid typing, distinguish structural keys, and feel comfortable; clicks respect Silent Mode and system keyboard-click settings.
 - [ ] Every theme keeps labels, hints, function icons, pressed states, popups and panels
   readable; Neon shows no sustained memory/GPU growth during ordinary typing.
 - [ ] VoiceOver can activate letters, functions, clipboard items and settings; typing remains

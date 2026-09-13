@@ -208,7 +208,7 @@ final class KeyboardViewModel: ObservableObject {
         pressedKeyIDs.insert(positioned.id)
 
         // On press, not release: the tap should feel immediate, the way a real key does.
-        feedback.keyPressed()
+        feedback.keyPressed(action: positioned.key.action)
 
         // Backspace is the one key that acts on press and repeats while held.
         if positioned.key.action == .backspace {

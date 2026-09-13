@@ -17,8 +17,15 @@ import UIKit
 /// It draws the same `KeyboardRootView` the extension does, so what you compare is the real
 /// thing, not a mock-up.
 struct KeyboardPreviewView: View {
-    @StateObject private var model = KeyboardViewModel()
+    @StateObject private var model: KeyboardViewModel
     @StateObject private var handler = PreviewActionHandler()
+
+    init(
+        settings: KeyboardSettingsStore = KeyboardSettingsStore(),
+        repository: any ClipboardRepositoryProtocol = ClipboardRepository()
+    ) {
+        _model = StateObject(wrappedValue: KeyboardViewModel(settings: settings, repository: repository))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +73,7 @@ struct KeyboardPreviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text(handler.text.isEmpty ? "Type on the keyboard below." : handler.text)
+                    .accessibilityIdentifier("keyboard.preview.text")
                     .font(.body)
                     .foregroundStyle(handler.text.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)

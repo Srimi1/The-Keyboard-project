@@ -72,7 +72,7 @@ enum KeyboardTimings {
     /// Double-space → period is on by default.
     static let doubleSpacePeriodDefault = true
 
-    /// Haptics on, keypress sound off — the phone defaults.
+    /// v1 product defaults; existing saved preferences are preserved.
     static let hapticFeedbackDefault = true
-    static let keypressSoundDefault = false
+    static let keypressSoundDefault = true
 }

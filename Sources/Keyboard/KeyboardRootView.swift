@@ -5,6 +5,7 @@ struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
     @ObservedObject private var settings: KeyboardSettingsStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: KeyboardViewModel) {
         self.model = model
@@ -29,13 +30,17 @@ struct KeyboardRootView: View {
         // Transparent, never an opaque fill — iOS 26 wraps keyboards in a system glass
         // container and an opaque background renders as a gray bar (CONSTRAINTS §8).
         .background(Color.clear)
-        .accessibilityIdentifier("keyboard.theme.\(theme.id)")
+        // Keep identifiers on individual controls. A container identifier propagates
+        // through SwiftUI and replaces the clipboard/settings button identifiers.
     }
 
     @ViewBuilder
     private var activePanel: some View {
         switch model.panel {
         case .keys:
+            // Keys never fade in: typing must be instantly hit-testable, and this is where
+            // people spend nearly all their time, so a per-switch entrance delay here would
+            // read as lag rather than polish (see KeyboardMotion.panelAppear).
             KeyGrid(model: model, theme: theme)
         case .clipboard:
             ClipboardPanel(
@@ -44,6 +49,7 @@ struct KeyboardRootView: View {
                 settings: settings,
                 theme: theme
             )
+            .fadeInOnAppear()
         case .settings:
             KeyboardSettingsPanel(
                 model: model,
@@ -51,14 +57,40 @@ struct KeyboardRootView: View {
                 clipboard: model.clipboard,
                 theme: theme
             )
+            .fadeInOnAppear()
         case .diagnostics:
             #if DEBUG
             DiagnosticsPanel(model: model, theme: theme)
+                .fadeInOnAppear()
             #else
             KeyGrid(model: model, theme: theme)
             #endif
         }
     }
+}
+
+/// Fades a freshly-mounted panel's own content in, without animating its removal.
+///
+/// A shared `.animation(value: model.panel)` crossfade would keep the *outgoing* panel
+/// mounted — and hit-testable — for the whole transition. For `.clipboard`/`.settings` that
+/// is only a stray tap target, but `.keys` hosts `TouchTracker`'s raw multi-touch layer
+/// (UI-SPEC.md §3), and that must never coexist with another panel's controls. Animating only
+/// the incoming view's own opacity on `onAppear` gets an "eases in, never pops" feel with the
+/// outgoing view still removed synchronously, exactly as before this pass.
+private struct FadeInOnAppear: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .animation(KeyboardMotion.resolved(KeyboardMotion.panelAppear, reduceMotion: reduceMotion), value: appeared)
+            .onAppear { appeared = true }
+    }
+}
+
+private extension View {
+    func fadeInOnAppear() -> some View { modifier(FadeInOnAppear()) }
 }
 
 // MARK: - Strip
@@ -73,35 +105,34 @@ private struct KeyboardStrip: View {
     @ObservedObject var model: KeyboardViewModel
     @ObservedObject var clipboard: ClipboardController
     let theme: KeyboardTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 8) {
             clipboardButton
 
             // The chip previews the freshest explicit save so pasting it costs one tap and never
-            // opens the panel (CLIPBOARD.md §6).
+            // opens the panel (CLIPBOARD.md §6). Scales in from the clipboard button rather than
+            // just fading, so it visibly arrives from the action that created it.
             if let fresh = clipboard.freshItem, model.panel == .keys {
                 PasteChip(text: fresh.text, theme: theme) {
                     model.insertClipboardItem(fresh)
                 }
-                .transition(.opacity)
+                .transition(
+                    .scale(scale: 0.85, anchor: .leading).combined(with: .opacity)
+                )
             }
 
             Spacer(minLength: 0)
 
             settingsButton
 
-            #if DEBUG
-            if !ProcessInfo.processInfo.arguments.contains("-cleanPreview") {
-                DebugReadout(model: model, runner: model.diagnostics, theme: theme)
-            }
-            #endif
         }
         .padding(.horizontal, 8)
         .frame(height: KeyboardTheme.stripHeight)
         // `freshItem` flips outside any explicit withAnimation, so without this the chip's
         // `.transition` never runs and it snaps in and out.
-        .animation(.easeOut(duration: 0.2), value: clipboard.freshItem)
+        .animation(KeyboardMotion.resolved(KeyboardMotion.chip, reduceMotion: reduceMotion), value: clipboard.freshItem)
     }
 
     private var clipboardButton: some View {
@@ -126,6 +157,7 @@ private struct KeyboardStrip: View {
                         )
                 }
                 .contentShape(Rectangle())
+                .animation(KeyboardMotion.resolved(KeyboardMotion.toolbarState, reduceMotion: reduceMotion), value: model.panel)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(model.panel == .clipboard ? "Back to keyboard" : "Clipboard")
@@ -152,6 +184,7 @@ private struct KeyboardStrip: View {
                         )
                 }
                 .contentShape(Rectangle())
+                .animation(KeyboardMotion.resolved(KeyboardMotion.toolbarState, reduceMotion: reduceMotion), value: model.panel)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(model.panel == .settings ? "Back to keyboard" : "Keyboard settings")
@@ -190,49 +223,6 @@ private struct PasteChip: View {
     }
 }
 
-#if DEBUG
-/// Milestone label, live memory readout and the diagnostics toggle — a development tool.
-///
-/// `runner` is observed directly rather than reached through `model.diagnostics`: a nested
-/// `ObservableObject` does not forward `objectWillChange`, which is why the memory figure
-/// never updated while a 1 Hz timer kept computing it.
-private struct DebugReadout: View {
-    @ObservedObject var model: KeyboardViewModel
-    @ObservedObject var runner: DiagnosticsRunner
-    let theme: KeyboardTheme
-
-    var body: some View {
-        HStack(spacing: 6) {
-            // Q-10: what `needsInputModeSwitchKey` actually returns here, in this host app.
-            Text("globe \(model.needsGlobe ? "yes" : "NO")")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(model.needsGlobe ? theme.hintGlyph : .orange)
-
-            Text(String(format: "%.1f MB", runner.memoryMB))
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                .foregroundStyle(memoryColor)
-
-            Button {
-                model.perform(.diagnostics)
-            } label: {
-                Image(systemName: "stethoscope")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.accent)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var memoryColor: Color {
-        switch runner.memoryVerdict {
-        case .withinBudget: return theme.hintGlyph
-        case .overBudget: return .orange
-        case .critical: return .red
-        }
-    }
-}
-#endif
-
 // MARK: - Key grid
 
 /// Keys are drawn at absolute rects computed by ``KeyboardMetrics``, and the same rects are
@@ -244,6 +234,7 @@ private struct DebugReadout: View {
 private struct KeyGrid: View {
     @ObservedObject var model: KeyboardViewModel
     let theme: KeyboardTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -263,6 +254,8 @@ private struct KeyGrid: View {
                 // Previews sit above every key so a top-row popup is not clipped by its
                 // neighbours. A keyboard cannot draw above its own top edge, so the preview
                 // for row 1 is inset downward rather than floating outside (C-45 territory).
+                // Scales in from the key with a light overshoot and fades out plainly on
+                // dismiss (UI-SPEC.md §4's appear/dismiss timing); Reduce Motion cuts both.
                 ForEach(previewCandidates(in: keys)) { positioned in
                     KeyPreview(label: positioned.key.label, theme: theme)
                         .frame(width: positioned.rect.width * 1.35, height: positioned.rect.height * 1.1)
@@ -270,13 +263,17 @@ private struct KeyGrid: View {
                             x: positioned.rect.midX,
                             y: max(positioned.rect.height * 0.6, positioned.rect.minY - positioned.rect.height * 0.55)
                         )
+                        .transition(popupTransition)
                         .allowsHitTesting(false)
                 }
 
-                if let callout = model.callout {
-                    CalloutBar(callout: callout, model: model, theme: theme)
-                        .allowsHitTesting(false)
+                Group {
+                    if let callout = model.callout {
+                        CalloutBar(callout: callout, model: model, theme: theme)
+                            .transition(popupTransition)
+                    }
                 }
+                .allowsHitTesting(false)
 
                 // The globe key is a real UIButton underneath this layer, so its area must
                 // fall through rather than being consumed here (C-47).
@@ -286,7 +283,7 @@ private struct KeyGrid: View {
                     },
                     accessibilityKeys: accessibilityDescriptors(for: keys),
                     onAccessibilityAction: { action in
-                        model.feedback.keyPressed()
+                        model.feedback.keyPressed(action: action)
                         model.perform(action)
                     },
                     passthroughRects: keys
@@ -299,6 +296,20 @@ private struct KeyGrid: View {
                 model.releaseAllTouches()
             })
         }
+    }
+
+    /// Scale-from-the-key-plus-fade on appear, a plain quicker fade on dismiss — the
+    /// appear/dismiss timing UI-SPEC.md §4 flags as unmeasured. Baked into the transition
+    /// itself (rather than an ambient `.animation(value:)`) so it runs whenever the popup's
+    /// membership changes without needing every call site to remember to wrap it.
+    private var popupTransition: AnyTransition {
+        .asymmetric(
+            insertion: .scale(scale: 0.85, anchor: .bottom)
+                .combined(with: .opacity)
+                .animation(KeyboardMotion.resolved(KeyboardMotion.popupAppear, reduceMotion: reduceMotion)),
+            removal: .opacity
+                .animation(KeyboardMotion.resolved(KeyboardMotion.popupDismiss, reduceMotion: reduceMotion))
+        )
     }
 
     /// Only character-bearing keys preview. Space, shift, backspace, return and the layer
@@ -376,6 +387,7 @@ private struct KeyFace: View {
     let theme: KeyboardTheme
     let isPressed: Bool
     let isActive: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -390,14 +402,24 @@ private struct KeyFace: View {
                 }
                 .shadow(color: theme.shadowColor, radius: theme.shadowRadius, y: theme.shadowY)
                 .shadow(color: theme.glowColor, radius: theme.glowRadius)
+                .animation(KeyboardMotion.resolved(KeyboardMotion.themeChange, reduceMotion: reduceMotion), value: theme.id)
+                .animation(KeyboardMotion.resolved(KeyboardMotion.keyActiveState, reduceMotion: reduceMotion), value: isActive)
 
             // Pressed keys darken rather than fade. The keyboard background is transparent
             // (iOS 26 glass), so an opacity drop lets the host app bleed through the key —
-            // a dim overlay keeps it opaque and legible in both palettes.
-            if isPressed {
-                RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
-                    .fill(theme.pressedOverlay)
-            }
+            // a dim overlay keeps it opaque and legible in both palettes. The overlay itself
+            // never leaves the view tree — only its opacity animates — so press and release
+            // crossfade instead of the highlight popping in and cutting out.
+            RoundedRectangle(cornerRadius: KeyboardTheme.keyCornerRadius, style: .continuous)
+                .fill(theme.pressedOverlay)
+                .opacity(isPressed ? 1 : 0)
+                .animation(
+                    KeyboardMotion.resolved(
+                        isPressed ? KeyboardMotion.keyPress : KeyboardMotion.keyRelease,
+                        reduceMotion: reduceMotion
+                    ),
+                    value: isPressed
+                )
 
             keyLabel
 
@@ -425,6 +447,7 @@ private struct KeyFace: View {
             Image(systemName: symbol)
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(isActive ? theme.accent : theme.keyLabel)
+                .animation(KeyboardMotion.resolved(KeyboardMotion.keyActiveState, reduceMotion: reduceMotion), value: isActive)
         } else {
             Text(key.label)
                 .font(labelFont)
@@ -432,6 +455,7 @@ private struct KeyFace: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .padding(.horizontal, 2)
+                .animation(KeyboardMotion.resolved(KeyboardMotion.keyActiveState, reduceMotion: reduceMotion), value: isActive)
         }
     }
 

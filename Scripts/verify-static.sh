@@ -84,4 +84,8 @@ for script in Scripts/*.sh; do
     bash -n "$script"
 done
 
-echo "Static privacy, entitlement, plist, and shell checks passed."
+# Monochrome branding pipeline: catalog opacity/dimensions, manifest references,
+# achromatic production assets, stale-icon detection and renderer traceability.
+"$(dirname "$0")/verify-branding.sh"
+
+echo "Static privacy, entitlement, plist, branding, and shell checks passed."

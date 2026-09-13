@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "family": "Keys + Caret + Shield",
+  "status": "candidate-v2-monochrome",
+  "generatedAt": "2026-09-09",
+  "generator": {
+    "plugin": "ViewMax",
+    "model": "gemini-3.1-flash-image-preview",
+    "resolution": "2K",
+    "creditsCharged": 10
+  },
+  "palette": {
+    "black": "#000000",
+    "white": "#FFFFFF"
+  },
+  "renderer": "../../Scripts/render-brand-assets.swift",
+  "generations": [
+    {
+      "role": "color-app-icon-concept",
+      "generationId": "cmtts2w330005gm0as5dgr1du",
+      "source": "concepts/viewmax-app-icon-master-v1.jpg",
+      "archivedExport": "archive/app-icon-color-v1-1024.png"
+    },
+    {
+      "role": "brand-mark-reference",
+      "generationId": "cmtts459m0001gm0a9ezko5ka",
+      "source": "concepts/viewmax-brand-mark-v1.jpg",
+      "productionSources": [
+        "source/logo-mark-reversed.svg",
+        "source/logo-mark-monochrome.svg"
+      ]
+    },
+    {
+      "role": "onboarding-hero",
+      "generationId": "cmtts5hs60000gm0aarbedff5",
+      "source": "concepts/viewmax-onboarding-hero-v1.jpg",
+      "export": "exports/onboarding-hero-1600.jpg"
+    },
+    {
+      "role": "brand-banner",
+      "generationId": "cmtts6mm70000gm0als8d52hp",
+      "source": "concepts/viewmax-brand-banner-v1.jpg",
+      "export": "exports/brand-banner-2048.jpg"
+    },
+    {
+      "role": "monochrome-logo-direction",
+      "generationId": "cmttsu2d70005gm0a65sekjuc",
+      "source": "concepts/viewmax-monochrome-logo-v2.jpg",
+      "productionSources": [
+        "source/logo-mark-monochrome.svg",
+        "source/logo-mark-reversed.svg"
+      ],
+      "export": "exports/app-icon-1024.png",
+      "previewExports": [
+        "exports/app-icon-preview-256.png",
+        "exports/app-icon-preview-64.png"
+      ],
+      "activeIcon": "../../Sources/HostApp/Assets.xcassets/AppIcon.appiconset/AppIcon-Monochrome-1024.png",
+      "rendererOutputs": [
+        "exports/app-icon-1024.png",
+        "exports/app-icon-preview-256.png",
+        "exports/app-icon-preview-64.png",
+        "../../Sources/HostApp/Assets.xcassets/AppIcon.appiconset/AppIcon-Monochrome-1024.png"
+      ]
+    }
+  ],
+  "releaseChecks": [
+    "home-screen legibility on physical iPhone",
+    "independent name and mark clearance",
+    "real-device App Store screenshots"
+  ]
+}
