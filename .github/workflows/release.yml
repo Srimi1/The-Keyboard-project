@@ -61,7 +61,7 @@ jobs:
           echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
 
       - name: Upload approved evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-evidence-${{ steps.release.outputs.tag }}
           path: |
